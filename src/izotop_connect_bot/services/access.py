@@ -63,6 +63,7 @@ class AccessService:
                 first_name=tg_user.first_name,
                 language_code=tg_user.language_code,
                 is_admin=tg_user.id in self.settings.bot_admin_ids,
+                device_limit=None,
             )
 
     async def get_access_bundle(self, telegram_user_id: int) -> AccessBundle:
@@ -96,6 +97,7 @@ class AccessService:
                 telegram_username=telegram_username,
                 first_name=first_name,
                 expires_at=expires_at,
+                device_limit=user.device_limit,
             )
             vpn_account = await self.vpn_accounts.upsert_account(
                 session,
@@ -118,6 +120,7 @@ class AccessService:
                     telegram_username=user.telegram_username,
                     first_name=user.first_name,
                     expires_at=expires_at if subscription_is_active(subscription) else None,
+                    device_limit=user.device_limit,
                 )
                 if remote is not None and getattr(remote, "subscription_url", None):
                     vpn_account = await self.vpn_accounts.upsert_account(
@@ -149,6 +152,7 @@ class AccessService:
                     first_name=event.telegram_username,
                     language_code=None,
                     is_admin=event.telegram_user_id in self.settings.bot_admin_ids,
+                    device_limit=None,
                 )
                 expires_at = ensure_utc(event.expires_at)
                 status = "ACTIVE" if expires_at and expires_at > datetime.now(UTC) else "INACTIVE"
@@ -169,6 +173,7 @@ class AccessService:
                         telegram_username=user.telegram_username,
                         first_name=user.first_name,
                         expires_at=expires_at if expires_at > datetime.now(UTC) else None,
+                        device_limit=user.device_limit,
                     )
                     if remote is not None and getattr(remote, "subscription_url", None):
                         await self.vpn_accounts.upsert_account(
@@ -208,6 +213,7 @@ class AccessService:
         *,
         telegram_user_id: int,
         expires_at: datetime,
+        device_limit: int | None,
         note: str | None,
         imported_by_admin: int,
     ) -> AccessBundle:
@@ -219,6 +225,7 @@ class AccessService:
                 first_name=None,
                 language_code=None,
                 is_admin=telegram_user_id in self.settings.bot_admin_ids,
+                device_limit=device_limit or self.settings.remnawave_default_device_limit,
             )
             await self.subscriptions.upsert_subscription(
                 session,
@@ -243,6 +250,7 @@ class AccessService:
                 telegram_username=user.telegram_username,
                 first_name=user.first_name,
                 expires_at=ensure_utc(expires_at),
+                device_limit=user.device_limit,
             )
             if remote is not None and getattr(remote, "subscription_url", None):
                 await self.vpn_accounts.upsert_account(

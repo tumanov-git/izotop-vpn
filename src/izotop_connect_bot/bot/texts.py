@@ -155,6 +155,7 @@ def admin_user_card_text(
     is_active: bool,
     expires_at: datetime | None,
     has_vpn: bool,
+    device_limit: int,
     source: str | None,
     remnawave_username: str | None = None,
 ) -> str:
@@ -168,6 +169,7 @@ def admin_user_card_text(
         f"<b>Username:</b> {username}",
         f"<b>Подписка:</b> {status}",
         f"<b>Активна до:</b> {format_expiry(expires_at)}",
+        f"<b>Лимит устройств:</b> {device_limit}",
         f"<b>VPN-аккаунт:</b> {vpn_state}",
     ]
     if source:
@@ -185,7 +187,7 @@ def admin_users_list_text(rows: Iterable[AdminUserRow], *, title: str) -> str:
     for row in rows:
         username = f"@{row.telegram_username}" if row.telegram_username else "без username"
         marker = "ACTIVE" if row.is_active else "INACTIVE"
-        vpn = "VPN" if row.has_vpn else "noVPN"
+        vpn = f"VPN:{row.device_limit}" if row.has_vpn else f"noVPN:{row.device_limit}"
         lines.append(
             f"<code>{row.telegram_user_id}</code> | {username} | {marker} | {vpn} | {format_expiry(row.expires_at)}"
         )

@@ -32,6 +32,7 @@ class Settings(BaseSettings):
         default=None, alias="REMNAWAVE_EXTERNAL_SQUAD_UUID"
     )
     remnawave_user_prefix: str = Field(default="tg", alias="REMNAWAVE_USER_PREFIX")
+    remnawave_default_device_limit: int = Field(default=3, alias="REMNAWAVE_DEFAULT_DEVICE_LIMIT")
     remnawave_ssl_ignore: bool = Field(default=False, alias="REMNAWAVE_SSL_IGNORE")
 
     database_url: str = Field(

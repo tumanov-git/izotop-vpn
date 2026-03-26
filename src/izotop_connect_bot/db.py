@@ -23,6 +23,13 @@ def create_session_factory(engine: AsyncEngine) -> async_sessionmaker[AsyncSessi
 async def init_db(engine: AsyncEngine) -> None:
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+        if engine.url.drivername.startswith("sqlite"):
+            result = await conn.exec_driver_sql("PRAGMA table_info(users)")
+            columns = {row[1] for row in result.fetchall()}
+            if "device_limit" not in columns:
+                await conn.exec_driver_sql(
+                    "ALTER TABLE users ADD COLUMN device_limit INTEGER NOT NULL DEFAULT 3"
+                )
 
 
 @asynccontextmanager

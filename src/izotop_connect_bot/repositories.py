@@ -35,6 +35,7 @@ class AdminUserRow:
     telegram_user_id: int
     telegram_username: str | None
     first_name: str | None
+    device_limit: int
     is_active: bool
     expires_at: datetime | None
     has_vpn: bool
@@ -58,6 +59,7 @@ class UserRepository:
         first_name: str | None,
         language_code: str | None,
         is_admin: bool,
+        device_limit: int | None = None,
     ) -> User:
         user = await session.get(User, telegram_user_id)
         if user is None:
@@ -67,6 +69,7 @@ class UserRepository:
                 first_name=first_name,
                 language_code=language_code,
                 is_admin=is_admin,
+                device_limit=device_limit or 3,
             )
             session.add(user)
         else:
@@ -74,6 +77,8 @@ class UserRepository:
             user.first_name = first_name
             user.language_code = language_code
             user.is_admin = is_admin
+            if device_limit is not None:
+                user.device_limit = device_limit
         return user
 
     async def get_user(self, session: AsyncSession, telegram_user_id: int) -> User | None:
@@ -123,6 +128,7 @@ class UserRepository:
                     telegram_user_id=user.telegram_user_id,
                     telegram_username=user.telegram_username,
                     first_name=user.first_name,
+                    device_limit=user.device_limit,
                     is_active=is_active,
                     expires_at=ensure_utc(subscription.expires_at) if subscription else None,
                     has_vpn=vpn_account is not None,

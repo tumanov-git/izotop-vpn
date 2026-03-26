@@ -37,6 +37,7 @@ class RemnawaveService:
         telegram_username: str | None,
         first_name: str | None,
         expires_at: datetime,
+        device_limit: int,
     ) -> Any:
         expires_at = expires_at.astimezone(UTC)
         remote_user = await self.get_user_by_telegram_id(telegram_user_id)
@@ -58,6 +59,7 @@ class RemnawaveService:
                 description=description,
                 status=UserStatus.ACTIVE,
                 traffic_limit_strategy=TrafficLimitStrategy.NO_RESET,
+                hwid_device_limit=device_limit,
                 active_internal_squads=active_internal_squads or None,
                 external_squad_uuid=external_squad_uuid,
             )
@@ -69,6 +71,7 @@ class RemnawaveService:
             description=description,
             expire_at=expires_at,
             status=UserStatus.ACTIVE,
+            hwid_device_limit=device_limit,
             active_internal_squads=active_internal_squads or None,
             external_squad_uuid=external_squad_uuid,
         )
@@ -84,6 +87,7 @@ class RemnawaveService:
         telegram_username: str | None,
         first_name: str | None,
         expires_at: datetime | None,
+        device_limit: int,
     ) -> Any | None:
         if expires_at is None:
             remote = await self.get_user_by_telegram_id(telegram_user_id)
@@ -102,6 +106,7 @@ class RemnawaveService:
             telegram_username=telegram_username,
             first_name=first_name,
             expires_at=expires_at,
+            device_limit=device_limit,
         )
 
     async def create_trial_extension(self, telegram_user_id: int) -> Any:
@@ -110,5 +115,5 @@ class RemnawaveService:
             telegram_username=None,
             first_name="Manual sync",
             expires_at=datetime.now(UTC) + timedelta(days=30),
+            device_limit=self.settings.remnawave_default_device_limit,
         )
-

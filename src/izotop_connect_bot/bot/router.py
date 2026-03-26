@@ -389,8 +389,13 @@ def create_router(access_service: AccessService, settings: Settings) -> Router:
             return
         await state.set_state(AdminStates.waiting_for_manual_import)
         await callback.message.answer(
-            "Пришли строку в формате:\n<code>telegram_user_id YYYY-MM-DD комментарий</code>\n\n"
-            "Пример:\n<code>123456789 2026-05-10 tribute_old_user</code>"
+            "Пришли строку в формате:\n"
+            "<code>telegram_user_id YYYY-MM-DD [device_limit] [комментарий]</code>\n"
+            "или\n"
+            "<code>telegram_user_id forever [device_limit] [комментарий]</code>\n\n"
+            "Примеры:\n"
+            "<code>123456789 2026-05-10 3 tribute_old_user</code>\n"
+            "<code>123456789 forever 9 vip_friend</code>"
         )
         await callback.answer()
 
@@ -414,6 +419,7 @@ def create_router(access_service: AccessService, settings: Settings) -> Router:
             is_active=access.is_active,
             expires_at=access.expires_at,
             has_vpn=access.vpn_account is not None,
+            device_limit=access.user.device_limit,
             source=access.subscription.source if access.subscription else None,
             remnawave_username=access.vpn_account.remnawave_username if access.vpn_account else None,
         )
@@ -432,28 +438,50 @@ def create_router(access_service: AccessService, settings: Settings) -> Router:
             return
         parts = (message.text or "").split(maxsplit=2)
         if len(parts) < 2:
-            await message.answer("Нужен формат: <code>telegram_user_id YYYY-MM-DD комментарий</code>.")
+            await message.answer(
+                "Нужен формат: <code>telegram_user_id YYYY-MM-DD [device_limit] [комментарий]</code> "
+                "или <code>telegram_user_id forever [device_limit] [комментарий]</code>."
+            )
             return
         try:
             telegram_user_id = int(parts[0])
-            parsed = datetime.fromisoformat(parts[1])
-            expires_at = parsed.replace(tzinfo=UTC) if parsed.tzinfo is None else parsed.astimezone(UTC)
+            raw_expiry = parts[1].strip().lower()
+            if raw_expiry == "forever":
+                expires_at = datetime(2099, 12, 31, 23, 59, 59, tzinfo=UTC)
+            else:
+                parsed = datetime.fromisoformat(parts[1])
+                expires_at = parsed.replace(tzinfo=UTC) if parsed.tzinfo is None else parsed.astimezone(UTC)
         except ValueError:
             await message.answer("Не смог разобрать <code>telegram_user_id</code> или дату.")
             return
-        note = parts[2] if len(parts) > 2 else None
+        device_limit = settings.remnawave_default_device_limit
+        note = None
+        if len(parts) > 2:
+            tail = parts[2].split(maxsplit=1)
+            if tail[0].isdigit():
+                device_limit = int(tail[0])
+                note = tail[1] if len(tail) > 1 else None
+            else:
+                note = parts[2]
         access = await access_service.admin_manual_import(
             telegram_user_id=telegram_user_id,
             expires_at=expires_at,
+            device_limit=device_limit,
             note=note,
             imported_by_admin=message.from_user.id if message.from_user else 0,
         )
         await message.answer(
             "Импорт выполнен.\n\n"
-            + welcome_text(
-                str(telegram_user_id),
+            + admin_user_card_text(
+                name=str(telegram_user_id),
+                telegram_user_id=telegram_user_id,
+                telegram_username=access.user.telegram_username if access.user else None,
                 is_active=access.is_active,
                 expires_at=access.expires_at,
+                has_vpn=access.vpn_account is not None,
+                device_limit=access.user.device_limit if access.user else settings.remnawave_default_device_limit,
+                source=access.subscription.source if access.subscription else None,
+                remnawave_username=access.vpn_account.remnawave_username if access.vpn_account else None,
             ),
             reply_markup=admin_user_keyboard(telegram_user_id, has_access=access.vpn_account is not None),
         )
@@ -478,6 +506,7 @@ def create_router(access_service: AccessService, settings: Settings) -> Router:
                 is_active=access.is_active,
                 expires_at=access.expires_at,
                 has_vpn=access.vpn_account is not None,
+                device_limit=access.user.device_limit,
                 source=access.subscription.source if access.subscription else None,
                 remnawave_username=access.vpn_account.remnawave_username if access.vpn_account else None,
             ),
@@ -513,6 +542,7 @@ def create_router(access_service: AccessService, settings: Settings) -> Router:
                 is_active=refreshed.is_active,
                 expires_at=refreshed.expires_at,
                 has_vpn=refreshed.vpn_account is not None,
+                device_limit=refreshed.user.device_limit,
                 source=refreshed.subscription.source if refreshed.subscription else None,
                 remnawave_username=refreshed.vpn_account.remnawave_username if refreshed.vpn_account else None,
             ),
