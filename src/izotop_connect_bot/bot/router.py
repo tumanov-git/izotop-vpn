@@ -5,6 +5,7 @@ from io import BytesIO
 
 import qrcode
 from aiogram import F, Router
+from aiogram.exceptions import TelegramBadRequest
 from aiogram.filters import CommandStart
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
@@ -48,6 +49,19 @@ def _is_admin(message: Message | CallbackQuery, settings: Settings) -> bool:
     return bool(user and user.id in settings.bot_admin_ids)
 
 
+async def _safe_edit_text(
+    message: Message,
+    text: str,
+    *,
+    reply_markup=None,
+) -> None:
+    try:
+        await message.edit_text(text, reply_markup=reply_markup)
+    except TelegramBadRequest as exc:
+        if "message is not modified" not in str(exc):
+            raise
+
+
 async def _send_dashboard(message: Message, access: AccessBundle, settings: Settings) -> None:
     name = _display_name(message)
     await message.answer(
@@ -85,7 +99,8 @@ def create_router(access_service: AccessService, settings: Settings) -> Router:
         if not callback.from_user or not callback.message:
             return
         access = await access_service.get_access_bundle(callback.from_user.id)
-        await callback.message.edit_text(
+        await _safe_edit_text(
+            callback.message,
             welcome_text(
                 callback.from_user.first_name or "друг",
                 is_active=access.is_active,
@@ -104,7 +119,8 @@ def create_router(access_service: AccessService, settings: Settings) -> Router:
         if not callback.from_user or not callback.message:
             return
         access = await access_service.refresh_remote_state(callback.from_user.id)
-        await callback.message.edit_text(
+        await _safe_edit_text(
+            callback.message,
             welcome_text(
                 callback.from_user.first_name or "друг",
                 is_active=access.is_active,
@@ -124,7 +140,8 @@ def create_router(access_service: AccessService, settings: Settings) -> Router:
             return
         access = await access_service.get_access_bundle(callback.from_user.id)
         if not access.is_active:
-            await callback.message.edit_text(
+            await _safe_edit_text(
+                callback.message,
                 inactive_access_text(),
                 reply_markup=home_keyboard(
                     has_access=False,
@@ -134,7 +151,8 @@ def create_router(access_service: AccessService, settings: Settings) -> Router:
             )
             await callback.answer()
             return
-        await callback.message.edit_text(
+        await _safe_edit_text(
+            callback.message,
             "Выбери устройство. Мы дадим короткую инструкцию и твою подписку.",
             reply_markup=device_keyboard(prefix="access"),
         )
@@ -144,7 +162,8 @@ def create_router(access_service: AccessService, settings: Settings) -> Router:
     async def on_guides(callback: CallbackQuery) -> None:
         if not callback.message:
             return
-        await callback.message.edit_text(
+        await _safe_edit_text(
+            callback.message,
             "Выбери устройство, для которого показать краткий гайд.",
             reply_markup=device_keyboard(prefix="guide"),
         )
@@ -156,7 +175,8 @@ def create_router(access_service: AccessService, settings: Settings) -> Router:
             return
         access = await access_service.get_access_bundle(callback.from_user.id)
         if not access.vpn_account:
-            await callback.message.edit_text(
+            await _safe_edit_text(
+                callback.message,
                 "У тебя пока нет выданного доступа. Нажми <b>Получить доступ</b>, и мы выдадим подписку.",
                 reply_markup=home_keyboard(
                     has_access=access.is_active,
@@ -166,7 +186,8 @@ def create_router(access_service: AccessService, settings: Settings) -> Router:
             )
             await callback.answer()
             return
-        await callback.message.edit_text(
+        await _safe_edit_text(
+            callback.message,
             keys_text(
                 expires_at=access.expires_at,
                 subscription_url=access.vpn_account.subscription_url,
@@ -179,7 +200,8 @@ def create_router(access_service: AccessService, settings: Settings) -> Router:
     async def on_support(callback: CallbackQuery) -> None:
         if not callback.message:
             return
-        await callback.message.edit_text(
+        await _safe_edit_text(
+            callback.message,
             "Если что-то пошло не так, напиши в поддержку. Там же можно уточнить статус оплаты и перенос доступа.",
             reply_markup=support_keyboard(support_url=settings.bot_support_url),
         )
@@ -189,7 +211,8 @@ def create_router(access_service: AccessService, settings: Settings) -> Router:
     async def on_faq(callback: CallbackQuery) -> None:
         if not callback.message:
             return
-        await callback.message.edit_text(
+        await _safe_edit_text(
+            callback.message,
             faq_text(),
             reply_markup=faq_keyboard(),
         )
@@ -203,7 +226,8 @@ def create_router(access_service: AccessService, settings: Settings) -> Router:
         if item_key not in FAQ_ITEMS:
             await callback.answer("Такого FAQ пока нет", show_alert=True)
             return
-        await callback.message.edit_text(
+        await _safe_edit_text(
+            callback.message,
             faq_text(item_key),
             reply_markup=faq_item_keyboard(),
         )
@@ -215,7 +239,8 @@ def create_router(access_service: AccessService, settings: Settings) -> Router:
             return
         _, device = callback.data.split(":", 1)
         guide = DEVICE_GUIDES[device]
-        await callback.message.edit_text(
+        await _safe_edit_text(
+            callback.message,
             f"<b>{guide['title']}</b>\n\n{guide['body']}",
             reply_markup=device_keyboard(prefix="access"),
         )
@@ -234,7 +259,8 @@ def create_router(access_service: AccessService, settings: Settings) -> Router:
                 first_name=callback.from_user.first_name,
             )
         except PermissionError:
-            await callback.message.edit_text(
+            await _safe_edit_text(
+                callback.message,
                 inactive_access_text(),
                 reply_markup=home_keyboard(
                     has_access=False,
@@ -246,7 +272,8 @@ def create_router(access_service: AccessService, settings: Settings) -> Router:
             return
 
         access = await access_service.get_access_bundle(callback.from_user.id)
-        await callback.message.edit_text(
+        await _safe_edit_text(
+            callback.message,
             f"<b>{guide['title']}</b>\n\n{guide['body']}\n\n"
             f"{keys_text(expires_at=access.expires_at, subscription_url=account.subscription_url)}",
             reply_markup=access_result_keyboard(account.subscription_url),
@@ -274,7 +301,8 @@ def create_router(access_service: AccessService, settings: Settings) -> Router:
             await callback.answer("Нет доступа", show_alert=True)
             return
         stats = await access_service.admin_get_stats()
-        await callback.message.edit_text(
+        await _safe_edit_text(
+            callback.message,
             admin_stats_text(
                 stats.total_users,
                 stats.active_subscriptions,
@@ -291,7 +319,8 @@ def create_router(access_service: AccessService, settings: Settings) -> Router:
             await callback.answer("Нет доступа", show_alert=True)
             return
         stats = await access_service.admin_get_stats()
-        await callback.message.edit_text(
+        await _safe_edit_text(
+            callback.message,
             admin_stats_text(
                 stats.total_users,
                 stats.active_subscriptions,
@@ -395,7 +424,8 @@ def create_router(access_service: AccessService, settings: Settings) -> Router:
         if access.user is None:
             await callback.answer("Пользователь не найден", show_alert=True)
             return
-        await callback.message.edit_text(
+        await _safe_edit_text(
+            callback.message,
             welcome_text(
                 access.user.first_name or access.user.telegram_username or str(access.user.telegram_user_id),
                 is_active=access.is_active,
@@ -425,7 +455,8 @@ def create_router(access_service: AccessService, settings: Settings) -> Router:
             first_name=access.user.first_name,
         )
         refreshed = await access_service.admin_find_user(telegram_user_id)
-        await callback.message.edit_text(
+        await _safe_edit_text(
+            callback.message,
             welcome_text(
                 refreshed.user.first_name or refreshed.user.telegram_username or str(refreshed.user.telegram_user_id),
                 is_active=refreshed.is_active,

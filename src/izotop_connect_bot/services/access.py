@@ -16,6 +16,7 @@ from izotop_connect_bot.repositories import (
     UserRepository,
     VpnAccountRepository,
     WebhookEventRepository,
+    ensure_utc,
     subscription_is_active,
     user_view_model,
 )
@@ -85,11 +86,14 @@ class AccessService:
             if not subscription_is_active(subscription):
                 raise PermissionError("Subscription inactive")
 
+            expires_at = ensure_utc(subscription.expires_at)
+            if expires_at is None:
+                raise PermissionError("Subscription inactive")
             remote = await self.remnawave.sync_access(
                 telegram_user_id=telegram_user_id,
                 telegram_username=telegram_username,
                 first_name=first_name,
-                expires_at=subscription.expires_at,
+                expires_at=expires_at,
             )
             vpn_account = await self.vpn_accounts.upsert_account(
                 session,
@@ -105,12 +109,13 @@ class AccessService:
             user = await self.users.get_user(session, telegram_user_id)
             subscription = await self.subscriptions.get_subscription(session, telegram_user_id)
             vpn_account = await self.vpn_accounts.get_account(session, telegram_user_id)
-            if user and subscription and subscription.expires_at:
+            expires_at = ensure_utc(subscription.expires_at) if subscription else None
+            if user and subscription and expires_at:
                 remote = await self.remnawave.sync_access(
                     telegram_user_id=telegram_user_id,
                     telegram_username=user.telegram_username,
                     first_name=user.first_name,
-                    expires_at=subscription.expires_at if subscription_is_active(subscription) else None,
+                    expires_at=expires_at if subscription_is_active(subscription) else None,
                 )
                 if remote is not None and getattr(remote, "subscription_url", None):
                     vpn_account = await self.vpn_accounts.upsert_account(
@@ -143,7 +148,8 @@ class AccessService:
                     language_code=None,
                     is_admin=event.telegram_user_id in self.settings.bot_admin_ids,
                 )
-                status = "ACTIVE" if event.expires_at and event.expires_at > datetime.now(UTC) else "INACTIVE"
+                expires_at = ensure_utc(event.expires_at)
+                status = "ACTIVE" if expires_at and expires_at > datetime.now(UTC) else "INACTIVE"
                 await self.subscriptions.upsert_subscription(
                     session,
                     telegram_user_id=user.telegram_user_id,
@@ -151,16 +157,16 @@ class AccessService:
                     period_id=event.period_id,
                     channel_id=event.channel_id,
                     status=status,
-                    expires_at=event.expires_at,
+                    expires_at=expires_at,
                     cancelled=event.cancelled,
                     source="tribute",
                 )
-                if event.expires_at is not None:
+                if expires_at is not None:
                     remote = await self.remnawave.sync_access(
                         telegram_user_id=user.telegram_user_id,
                         telegram_username=user.telegram_username,
                         first_name=user.first_name,
-                        expires_at=event.expires_at if event.expires_at > datetime.now(UTC) else None,
+                        expires_at=expires_at if expires_at > datetime.now(UTC) else None,
                     )
                     if remote is not None and getattr(remote, "subscription_url", None):
                         await self.vpn_accounts.upsert_account(
@@ -211,14 +217,14 @@ class AccessService:
                 period_id=None,
                 channel_id=None,
                 status="ACTIVE",
-                expires_at=expires_at.astimezone(UTC),
+                expires_at=ensure_utc(expires_at),
                 cancelled=False,
                 source="manual",
             )
             await self.manual_imports.add(
                 session,
                 telegram_user_id=telegram_user_id,
-                expires_at=expires_at.astimezone(UTC),
+                expires_at=ensure_utc(expires_at),
                 note=note,
                 imported_by_admin=imported_by_admin,
             )
@@ -226,7 +232,7 @@ class AccessService:
                 telegram_user_id=user.telegram_user_id,
                 telegram_username=user.telegram_username,
                 first_name=user.first_name,
-                expires_at=expires_at.astimezone(UTC),
+                expires_at=ensure_utc(expires_at),
             )
             if remote is not None and getattr(remote, "subscription_url", None):
                 await self.vpn_accounts.upsert_account(

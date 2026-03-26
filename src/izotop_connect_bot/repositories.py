@@ -14,6 +14,14 @@ def utcnow() -> datetime:
     return datetime.now(UTC)
 
 
+def ensure_utc(value: datetime | None) -> datetime | None:
+    if value is None:
+        return None
+    if value.tzinfo is None:
+        return value.replace(tzinfo=UTC)
+    return value.astimezone(UTC)
+
+
 @dataclass(slots=True)
 class DashboardStats:
     total_users: int
@@ -103,7 +111,7 @@ class SubscriptionRepository:
                 period_id=period_id,
                 channel_id=channel_id,
                 status=status,
-                expires_at=expires_at,
+                expires_at=ensure_utc(expires_at),
                 cancelled=cancelled,
                 source=source,
             )
@@ -113,7 +121,7 @@ class SubscriptionRepository:
             subscription.period_id = period_id
             subscription.channel_id = channel_id
             subscription.status = status
-            subscription.expires_at = expires_at
+            subscription.expires_at = ensure_utc(expires_at)
             subscription.cancelled = cancelled
             subscription.source = source
         return subscription
@@ -182,7 +190,7 @@ class ManualImportRepository:
     ) -> ManualImport:
         item = ManualImport(
             telegram_user_id=telegram_user_id,
-            expires_at=expires_at,
+            expires_at=ensure_utc(expires_at),
             note=note,
             imported_by_admin=imported_by_admin,
         )
@@ -193,7 +201,8 @@ class ManualImportRepository:
 def subscription_is_active(subscription: Subscription | None) -> bool:
     if subscription is None or subscription.expires_at is None:
         return False
-    return subscription.expires_at > utcnow()
+    expires_at = ensure_utc(subscription.expires_at)
+    return bool(expires_at and expires_at > utcnow())
 
 
 def user_view_model(
@@ -207,6 +216,5 @@ def user_view_model(
         "subscription": subscription,
         "vpn_account": vpn_account,
         "is_active": is_active,
-        "expires_at": subscription.expires_at if subscription else None,
+        "expires_at": ensure_utc(subscription.expires_at) if subscription else None,
     }
-

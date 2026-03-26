@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import UTC, datetime
 
 
 DEVICE_GUIDES: dict[str, dict[str, str]] = {
@@ -96,6 +96,10 @@ FAQ_ITEMS: dict[str, dict[str, str]] = {
 def format_expiry(expires_at: datetime | None) -> str:
     if expires_at is None:
         return "не задана"
+    if expires_at.tzinfo is None:
+        expires_at = expires_at.replace(tzinfo=UTC)
+    else:
+        expires_at = expires_at.astimezone(UTC)
     return expires_at.strftime("%d.%m.%Y %H:%M UTC")
 
 
