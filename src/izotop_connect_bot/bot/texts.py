@@ -1,31 +1,34 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from typing import Iterable
+
+from izotop_connect_bot.repositories import AdminUserRow, WebhookEventRow
 
 
 DEVICE_GUIDES: dict[str, dict[str, str]] = {
     "iphone": {
         "title": "iPhone",
         "body": (
-            "1. Установи <b>v2RayTun</b>.\n"
+            "1. Установи <b>Happ</b>.\n"
             "2. Нажми <b>Открыть подписку</b>.\n"
-            "3. Импортируй ссылку в приложение.\n"
+            "3. Импортируй ссылку в Happ.\n"
             "4. Включи профиль и разреши VPN."
         ),
     },
     "android": {
         "title": "Android",
         "body": (
-            "1. Установи <b>v2rayNG</b>.\n"
+            "1. Установи <b>Happ</b>.\n"
             "2. Открой подписку по ссылке.\n"
-            "3. Импортируй профиль.\n"
+            "3. Импортируй профиль в Happ.\n"
             "4. Подключись через созданную запись."
         ),
     },
     "windows": {
         "title": "Windows",
         "body": (
-            "1. Установи <b>Hiddify Next</b> или другой совместимый клиент.\n"
+            "1. Установи <b>Happ</b>.\n"
             "2. Импортируй <b>subscription URL</b>.\n"
             "3. Выбери сервер <b>Netherlands</b>.\n"
             "4. Подключись."
@@ -34,7 +37,7 @@ DEVICE_GUIDES: dict[str, dict[str, str]] = {
     "macos": {
         "title": "macOS",
         "body": (
-            "1. Установи <b>v2RayTun</b> или <b>Hiddify Next</b>.\n"
+            "1. Установи <b>Happ</b>.\n"
             "2. Импортируй подписку.\n"
             "3. Разреши VPN-профиль.\n"
             "4. Подключись к нужному хосту."
@@ -142,6 +145,62 @@ def admin_stats_text(total_users: int, active_subscriptions: int, vpn_accounts: 
         f"VPN-аккаунты: <b>{vpn_accounts}</b>\n"
         f"Webhook events: <b>{webhooks}</b>"
     )
+
+
+def admin_user_card_text(
+    *,
+    name: str,
+    telegram_user_id: int,
+    telegram_username: str | None,
+    is_active: bool,
+    expires_at: datetime | None,
+    has_vpn: bool,
+    source: str | None,
+    remnawave_username: str | None = None,
+) -> str:
+    username = f"@{telegram_username}" if telegram_username else "не указан"
+    vpn_state = "есть" if has_vpn else "нет"
+    status = "активна" if is_active else "неактивна"
+    lines = [
+        f"<b>{name}</b>",
+        "",
+        f"<b>Telegram ID:</b> <code>{telegram_user_id}</code>",
+        f"<b>Username:</b> {username}",
+        f"<b>Подписка:</b> {status}",
+        f"<b>Активна до:</b> {format_expiry(expires_at)}",
+        f"<b>VPN-аккаунт:</b> {vpn_state}",
+    ]
+    if source:
+        lines.append(f"<b>Источник:</b> {source}")
+    if remnawave_username:
+        lines.append(f"<b>Remnawave user:</b> <code>{remnawave_username}</code>")
+    return "\n".join(lines)
+
+
+def admin_users_list_text(rows: Iterable[AdminUserRow], *, title: str) -> str:
+    rows = list(rows)
+    if not rows:
+        return f"<b>{title}</b>\n\nСписок пока пуст."
+    lines = [f"<b>{title}</b>", ""]
+    for row in rows:
+        username = f"@{row.telegram_username}" if row.telegram_username else "без username"
+        marker = "ACTIVE" if row.is_active else "INACTIVE"
+        vpn = "VPN" if row.has_vpn else "noVPN"
+        lines.append(
+            f"<code>{row.telegram_user_id}</code> | {username} | {marker} | {vpn} | {format_expiry(row.expires_at)}"
+        )
+    return "\n".join(lines)
+
+
+def admin_webhooks_text(rows: Iterable[WebhookEventRow]) -> str:
+    rows = list(rows)
+    if not rows:
+        return "<b>Webhook events</b>\n\nСобытий пока нет."
+    lines = ["<b>Webhook events</b>", ""]
+    for row in rows:
+        processed = format_expiry(row.processed_at)
+        lines.append(f"{processed} | <b>{row.event_name}</b>\n<code>{row.event_key}</code>")
+    return "\n\n".join(lines)
 
 
 def faq_text(item_key: str | None = None) -> str:

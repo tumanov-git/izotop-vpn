@@ -10,12 +10,14 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from izotop_connect_bot.config import Settings
 from izotop_connect_bot.db import session_scope
 from izotop_connect_bot.repositories import (
+    AdminUserRow,
     DashboardStats,
     ManualImportRepository,
     SubscriptionRepository,
     UserRepository,
     VpnAccountRepository,
     WebhookEventRepository,
+    WebhookEventRow,
     ensure_utc,
     subscription_is_active,
     user_view_model,
@@ -192,6 +194,14 @@ class AccessService:
 
     async def admin_find_user(self, telegram_user_id: int) -> AccessBundle:
         return await self.get_access_bundle(telegram_user_id)
+
+    async def admin_list_users(self, *, active_only: bool = False, limit: int = 25) -> list[AdminUserRow]:
+        async with session_scope(self.session_factory) as session:
+            return await self.users.list_users(session, active_only=active_only, limit=limit)
+
+    async def admin_list_webhooks(self, *, limit: int = 20) -> list[WebhookEventRow]:
+        async with session_scope(self.session_factory) as session:
+            return await self.webhook_events.list_recent(session, limit=limit)
 
     async def admin_manual_import(
         self,

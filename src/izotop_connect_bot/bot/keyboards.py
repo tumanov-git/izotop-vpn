@@ -32,7 +32,6 @@ def home_keyboard(*, has_access: bool, is_admin: bool, buy_url: str) -> InlineKe
                 )
             ]
         )
-    rows.append([InlineKeyboardButton(text="Инструкции", callback_data="home:guides")])
     rows.append([InlineKeyboardButton(text="FAQ", callback_data="home:faq")])
     rows.append([InlineKeyboardButton(text="Поддержка", callback_data="home:support")])
     if is_admin:
@@ -115,7 +114,10 @@ def faq_item_keyboard() -> InlineKeyboardMarkup:
 def admin_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
-            [InlineKeyboardButton(text="Статистика", callback_data="admin:stats", style=ButtonStyle.PRIMARY)],
+            [InlineKeyboardButton(text="Все пользователи", callback_data="admin:users", style=ButtonStyle.PRIMARY)],
+            [InlineKeyboardButton(text="Активные", callback_data="admin:active")],
+            [InlineKeyboardButton(text="Webhook events", callback_data="admin:webhooks")],
+            [InlineKeyboardButton(text="Статистика", callback_data="admin:stats")],
             [InlineKeyboardButton(text="Найти пользователя", callback_data="admin:find_prompt")],
             [InlineKeyboardButton(text="Импортировать вручную", callback_data="admin:import_prompt")],
             [InlineKeyboardButton(text="Назад", callback_data="home:root")],

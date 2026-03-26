@@ -30,6 +30,24 @@ class DashboardStats:
     processed_webhooks: int
 
 
+@dataclass(slots=True)
+class AdminUserRow:
+    telegram_user_id: int
+    telegram_username: str | None
+    first_name: str | None
+    is_active: bool
+    expires_at: datetime | None
+    has_vpn: bool
+    source: str | None
+
+
+@dataclass(slots=True)
+class WebhookEventRow:
+    event_name: str
+    event_key: str
+    processed_at: datetime | None
+
+
 class UserRepository:
     async def upsert_user(
         self,
@@ -69,15 +87,8 @@ class UserRepository:
 
     async def get_stats(self, session: AsyncSession) -> DashboardStats:
         total_users = await session.scalar(select(func.count()).select_from(User)) or 0
-        active_subscriptions = (
-            await session.scalar(
-                select(func.count()).select_from(Subscription).where(
-                    Subscription.expires_at.is_not(None),
-                    Subscription.expires_at > utcnow(),
-                )
-            )
-            or 0
-        )
+        subscriptions = (await session.execute(select(Subscription))).scalars().all()
+        active_subscriptions = sum(1 for item in subscriptions if subscription_is_active(item))
         vpn_accounts = await session.scalar(select(func.count()).select_from(VpnAccount)) or 0
         processed_webhooks = await session.scalar(select(func.count()).select_from(WebhookEvent)) or 0
         return DashboardStats(
@@ -86,6 +97,39 @@ class UserRepository:
             vpn_accounts=vpn_accounts,
             processed_webhooks=processed_webhooks,
         )
+
+    async def list_users(
+        self,
+        session: AsyncSession,
+        *,
+        active_only: bool = False,
+        limit: int = 25,
+    ) -> list[AdminUserRow]:
+        query = select(User).order_by(User.created_at.desc()).limit(limit)
+        users = (await session.execute(query)).scalars().all()
+        rows: list[AdminUserRow] = []
+        for user in users:
+            subscription = await session.scalar(
+                select(Subscription).where(Subscription.telegram_user_id == user.telegram_user_id)
+            )
+            vpn_account = await session.scalar(
+                select(VpnAccount).where(VpnAccount.telegram_user_id == user.telegram_user_id)
+            )
+            is_active = subscription_is_active(subscription)
+            if active_only and not is_active:
+                continue
+            rows.append(
+                AdminUserRow(
+                    telegram_user_id=user.telegram_user_id,
+                    telegram_username=user.telegram_username,
+                    first_name=user.first_name,
+                    is_active=is_active,
+                    expires_at=ensure_utc(subscription.expires_at) if subscription else None,
+                    has_vpn=vpn_account is not None,
+                    source=subscription.source if subscription else None,
+                )
+            )
+        return rows
 
 
 class SubscriptionRepository:
@@ -176,6 +220,24 @@ class WebhookEventRepository:
         event = WebhookEvent(event_key=event_key, event_name=event_name, payload_json=payload_json)
         session.add(event)
         return event
+
+    async def list_recent(
+        self, session: AsyncSession, *, limit: int = 20
+    ) -> list[WebhookEventRow]:
+        query = (
+            select(WebhookEvent)
+            .order_by(WebhookEvent.processed_at.desc(), WebhookEvent.id.desc())
+            .limit(limit)
+        )
+        events = (await session.execute(query)).scalars().all()
+        return [
+            WebhookEventRow(
+                event_name=event.event_name,
+                event_key=event.event_key,
+                processed_at=ensure_utc(event.processed_at),
+            )
+            for event in events
+        ]
 
 
 class ManualImportRepository:

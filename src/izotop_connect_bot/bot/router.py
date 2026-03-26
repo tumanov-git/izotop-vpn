@@ -25,7 +25,10 @@ from izotop_connect_bot.bot.keyboards import (
 from izotop_connect_bot.bot.texts import (
     DEVICE_GUIDES,
     FAQ_ITEMS,
+    admin_user_card_text,
     admin_stats_text,
+    admin_users_list_text,
+    admin_webhooks_text,
     faq_text,
     inactive_access_text,
     keys_text,
@@ -294,6 +297,45 @@ def create_router(access_service: AccessService, settings: Settings) -> Router:
         )
         await callback.answer()
 
+    @router.callback_query(F.data == "admin:users")
+    async def on_admin_users(callback: CallbackQuery) -> None:
+        if not _is_admin(callback, settings) or not callback.message:
+            await callback.answer("Нет доступа", show_alert=True)
+            return
+        rows = await access_service.admin_list_users(limit=50)
+        await _safe_edit_text(
+            callback.message,
+            admin_users_list_text(rows, title="Все пользователи"),
+            reply_markup=admin_keyboard(),
+        )
+        await callback.answer()
+
+    @router.callback_query(F.data == "admin:active")
+    async def on_admin_active(callback: CallbackQuery) -> None:
+        if not _is_admin(callback, settings) or not callback.message:
+            await callback.answer("Нет доступа", show_alert=True)
+            return
+        rows = await access_service.admin_list_users(active_only=True, limit=50)
+        await _safe_edit_text(
+            callback.message,
+            admin_users_list_text(rows, title="Активные пользователи"),
+            reply_markup=admin_keyboard(),
+        )
+        await callback.answer()
+
+    @router.callback_query(F.data == "admin:webhooks")
+    async def on_admin_webhooks(callback: CallbackQuery) -> None:
+        if not _is_admin(callback, settings) or not callback.message:
+            await callback.answer("Нет доступа", show_alert=True)
+            return
+        rows = await access_service.admin_list_webhooks(limit=20)
+        await _safe_edit_text(
+            callback.message,
+            admin_webhooks_text(rows),
+            reply_markup=admin_keyboard(),
+        )
+        await callback.answer()
+
     @router.callback_query(F.data == "admin:menu")
     async def on_admin_menu(callback: CallbackQuery, state: FSMContext) -> None:
         await state.clear()
@@ -365,13 +407,16 @@ def create_router(access_service: AccessService, settings: Settings) -> Router:
         if access.user is None:
             await message.answer("Пользователь не найден.")
             return
-        text = welcome_text(
-            access.user.first_name or access.user.telegram_username or str(access.user.telegram_user_id),
+        text = admin_user_card_text(
+            name=access.user.first_name or access.user.telegram_username or str(access.user.telegram_user_id),
+            telegram_user_id=access.user.telegram_user_id,
+            telegram_username=access.user.telegram_username,
             is_active=access.is_active,
             expires_at=access.expires_at,
-        ) + f"\n\n<b>Telegram ID:</b> <code>{access.user.telegram_user_id}</code>"
-        if access.vpn_account:
-            text += f"\n<b>Remnawave user:</b> <code>{access.vpn_account.remnawave_username}</code>"
+            has_vpn=access.vpn_account is not None,
+            source=access.subscription.source if access.subscription else None,
+            remnawave_username=access.vpn_account.remnawave_username if access.vpn_account else None,
+        )
         await message.answer(
             text,
             reply_markup=admin_user_keyboard(
@@ -426,12 +471,16 @@ def create_router(access_service: AccessService, settings: Settings) -> Router:
             return
         await _safe_edit_text(
             callback.message,
-            welcome_text(
-                access.user.first_name or access.user.telegram_username or str(access.user.telegram_user_id),
+            admin_user_card_text(
+                name=access.user.first_name or access.user.telegram_username or str(access.user.telegram_user_id),
+                telegram_user_id=access.user.telegram_user_id,
+                telegram_username=access.user.telegram_username,
                 is_active=access.is_active,
                 expires_at=access.expires_at,
-            )
-            + f"\n\n<b>Telegram ID:</b> <code>{access.user.telegram_user_id}</code>",
+                has_vpn=access.vpn_account is not None,
+                source=access.subscription.source if access.subscription else None,
+                remnawave_username=access.vpn_account.remnawave_username if access.vpn_account else None,
+            ),
             reply_markup=admin_user_keyboard(telegram_user_id, has_access=access.vpn_account is not None),
         )
         await callback.answer()
@@ -457,12 +506,16 @@ def create_router(access_service: AccessService, settings: Settings) -> Router:
         refreshed = await access_service.admin_find_user(telegram_user_id)
         await _safe_edit_text(
             callback.message,
-            welcome_text(
-                refreshed.user.first_name or refreshed.user.telegram_username or str(refreshed.user.telegram_user_id),
+            admin_user_card_text(
+                name=refreshed.user.first_name or refreshed.user.telegram_username or str(refreshed.user.telegram_user_id),
+                telegram_user_id=refreshed.user.telegram_user_id,
+                telegram_username=refreshed.user.telegram_username,
                 is_active=refreshed.is_active,
                 expires_at=refreshed.expires_at,
-            )
-            + f"\n\n<b>Telegram ID:</b> <code>{refreshed.user.telegram_user_id}</code>",
+                has_vpn=refreshed.vpn_account is not None,
+                source=refreshed.subscription.source if refreshed.subscription else None,
+                remnawave_username=refreshed.vpn_account.remnawave_username if refreshed.vpn_account else None,
+            ),
             reply_markup=admin_user_keyboard(
                 telegram_user_id,
                 has_access=refreshed.vpn_account is not None,
