@@ -15,13 +15,17 @@ from izotop_connect_bot.bot.keyboards import (
     admin_keyboard,
     admin_user_keyboard,
     device_keyboard,
+    faq_item_keyboard,
+    faq_keyboard,
     home_keyboard,
     keys_keyboard,
     support_keyboard,
 )
 from izotop_connect_bot.bot.texts import (
     DEVICE_GUIDES,
+    FAQ_ITEMS,
     admin_stats_text,
+    faq_text,
     inactive_access_text,
     keys_text,
     welcome_text,
@@ -177,10 +181,31 @@ def create_router(access_service: AccessService, settings: Settings) -> Router:
             return
         await callback.message.edit_text(
             "Если что-то пошло не так, напиши в поддержку. Там же можно уточнить статус оплаты и перенос доступа.",
-            reply_markup=support_keyboard(
-                support_url=settings.bot_support_url,
-                faq_url=settings.bot_faq_url,
-            ),
+            reply_markup=support_keyboard(support_url=settings.bot_support_url),
+        )
+        await callback.answer()
+
+    @router.callback_query(F.data == "home:faq")
+    async def on_faq(callback: CallbackQuery) -> None:
+        if not callback.message:
+            return
+        await callback.message.edit_text(
+            faq_text(),
+            reply_markup=faq_keyboard(),
+        )
+        await callback.answer()
+
+    @router.callback_query(F.data.startswith("faq:"))
+    async def on_faq_item(callback: CallbackQuery) -> None:
+        if not callback.message:
+            return
+        _, item_key = callback.data.split(":", 1)
+        if item_key not in FAQ_ITEMS:
+            await callback.answer("Такого FAQ пока нет", show_alert=True)
+            return
+        await callback.message.edit_text(
+            faq_text(item_key),
+            reply_markup=faq_item_keyboard(),
         )
         await callback.answer()
 

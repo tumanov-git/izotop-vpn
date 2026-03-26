@@ -12,6 +12,7 @@ Telegram bot for `Izotop Connect`:
 
 - [Product and implementation plan](/Users/izotop/izotop vpn/docs/telegram-bot-plan.md)
 - [Remnawave panel in Poland, node in NL](/Users/izotop/izotop vpn/docs/remnawave-poland-panel-nl-node-bot.md)
+- [Linux deployment guide](/Users/izotop/izotop vpn/docs/bot-deploy-linux.md)
 
 ## Setup
 
@@ -35,4 +36,3 @@ The app starts:
 
 - FastAPI server for webhooks and health checks
 - Telegram bot polling loop
-

@@ -17,7 +17,6 @@ class Settings(BaseSettings):
     bot_token: str = Field(alias="BOT_TOKEN")
     bot_public_name: str = Field(default="Izotop Connect", alias="BOT_PUBLIC_NAME")
     bot_support_url: str = Field(alias="BOT_SUPPORT_URL")
-    bot_faq_url: str = Field(alias="BOT_FAQ_URL")
     bot_buy_url: str = Field(alias="BOT_BUY_URL")
     bot_admin_ids: tuple[int, ...] = Field(default_factory=tuple, alias="BOT_ADMIN_IDS")
 
@@ -60,4 +59,3 @@ class Settings(BaseSettings):
 @lru_cache(maxsize=1)
 def get_settings() -> Settings:
     return Settings()
-

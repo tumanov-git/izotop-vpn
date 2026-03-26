@@ -5,6 +5,7 @@ APP_BASE_URL=http://127.0.0.1:8080
 BOT_TOKEN=change_me
 BOT_PUBLIC_NAME=Izotop Connect
 BOT_SUPPORT_URL=https://t.me/change_me
+BOT_FAQ_URL=https://t.me/change_me
 BOT_BUY_URL=https://t.me/change_me
 BOT_ADMIN_IDS=123456789
 
@@ -19,3 +20,4 @@ REMNAWAVE_USER_PREFIX=tg
 REMNAWAVE_SSL_IGNORE=false
 
 DATABASE_URL=sqlite+aiosqlite:///./data/izotop_connect.db
+

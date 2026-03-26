@@ -7,8 +7,8 @@ DEVICE_GUIDES: dict[str, dict[str, str]] = {
     "iphone": {
         "title": "iPhone",
         "body": (
-            "1. Установи `v2RayTun`.\n"
-            "2. Нажми `Открыть подписку`.\n"
+            "1. Установи <b>v2RayTun</b>.\n"
+            "2. Нажми <b>Открыть подписку</b>.\n"
             "3. Импортируй ссылку в приложение.\n"
             "4. Включи профиль и разреши VPN."
         ),
@@ -16,7 +16,7 @@ DEVICE_GUIDES: dict[str, dict[str, str]] = {
     "android": {
         "title": "Android",
         "body": (
-            "1. Установи `v2rayNG`.\n"
+            "1. Установи <b>v2rayNG</b>.\n"
             "2. Открой подписку по ссылке.\n"
             "3. Импортируй профиль.\n"
             "4. Подключись через созданную запись."
@@ -25,16 +25,16 @@ DEVICE_GUIDES: dict[str, dict[str, str]] = {
     "windows": {
         "title": "Windows",
         "body": (
-            "1. Установи `Hiddify Next` или другой совместимый клиент.\n"
-            "2. Импортируй `subscription URL`.\n"
-            "3. Выбери сервер `Netherlands`.\n"
+            "1. Установи <b>Hiddify Next</b> или другой совместимый клиент.\n"
+            "2. Импортируй <b>subscription URL</b>.\n"
+            "3. Выбери сервер <b>Netherlands</b>.\n"
             "4. Подключись."
         ),
     },
     "macos": {
         "title": "macOS",
         "body": (
-            "1. Установи `v2RayTun` или `Hiddify Next`.\n"
+            "1. Установи <b>v2RayTun</b> или <b>Hiddify Next</b>.\n"
             "2. Импортируй подписку.\n"
             "3. Разреши VPN-профиль.\n"
             "4. Подключись к нужному хосту."
@@ -48,6 +48,47 @@ DEVICE_GUIDES: dict[str, dict[str, str]] = {
             "3. Выбери сервер.\n"
             "4. Проверь, что трафик идёт через VPN."
         ),
+    },
+}
+
+FAQ_ITEMS: dict[str, dict[str, str]] = {
+    "what_is_subscription": {
+        "title": "Что такое subscription URL?",
+        "body": (
+            "Это ссылка, через которую клиент забирает актуальный список VPN-конфигов. "
+            "Один и тот же URL можно импортировать на несколько устройств."
+        ),
+    },
+    "how_many_devices": {
+        "title": "Сколько устройств можно подключить?",
+        "body": (
+            "В текущей модели у пользователя один VPN-аккаунт и одна подписка, которую можно "
+            "импортировать на несколько устройств."
+        ),
+    },
+    "vpn_not_working": {
+        "title": "VPN не работает",
+        "body": (
+            "1. Нажми <b>Проверить подписку</b>.\n"
+            "2. Переимпортируй подписку в клиент.\n"
+            "3. Проверь дату окончания доступа.\n"
+            "4. Если не помогло, напиши в поддержку."
+        ),
+    },
+    "how_to_extend": {
+        "title": "Как продлить доступ?",
+        "body": (
+            "Если подписка оформлена через Tribute, продление произойдёт автоматически по данным "
+            "webhook. Если доступ не обновился, нажми <b>Проверить подписку</b> или напиши в поддержку."
+        ),
+    },
+    "iphone_setup": {
+        "title": "Как подключиться на iPhone?",
+        "body": DEVICE_GUIDES["iphone"]["body"],
+    },
+    "android_setup": {
+        "title": "Как подключиться на Android?",
+        "body": DEVICE_GUIDES["android"]["body"],
     },
 }
 
@@ -97,3 +138,13 @@ def admin_stats_text(total_users: int, active_subscriptions: int, vpn_accounts: 
         f"VPN-аккаунты: <b>{vpn_accounts}</b>\n"
         f"Webhook events: <b>{webhooks}</b>"
     )
+
+
+def faq_text(item_key: str | None = None) -> str:
+    if item_key is None:
+        return (
+            "<b>FAQ</b>\n\n"
+            "Здесь собраны быстрые ответы по подписке, устройствам и типовым проблемам."
+        )
+    item = FAQ_ITEMS[item_key]
+    return f"<b>{item['title']}</b>\n\n{item['body']}"
