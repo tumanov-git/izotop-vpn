@@ -1,0 +1,55 @@
+Metadata-Version: 2.4
+Name: izotop-connect-bot
+Version: 0.1.0
+Summary: Telegram bot for Izotop Connect with Tribute webhooks and Remnawave integration.
+Requires-Python: <3.14,>=3.12
+Description-Content-Type: text/markdown
+Requires-Dist: aiogram<4.0,>=3.18
+Requires-Dist: aiosqlite<1.0,>=0.20
+Requires-Dist: email-validator<3.0,>=2.2
+Requires-Dist: fastapi<1.0,>=0.115
+Requires-Dist: httpx<0.28,>=0.27
+Requires-Dist: pydantic-settings<3.0,>=2.7
+Requires-Dist: qrcode[pil]<9.0,>=8.0
+Requires-Dist: remnawave<2.7,>=2.6.1
+Requires-Dist: sqlalchemy<3.0,>=2.0.37
+Requires-Dist: uvicorn[standard]<1.0,>=0.34
+
+# Izotop Connect Bot
+
+Telegram bot for `Izotop Connect`:
+
+- user flow via inline keyboards;
+- Tribute subscription status via webhooks;
+- Remnawave user creation and `subscription URL` issuance;
+- lightweight admin tools in bot;
+- SQLite storage for the first production iteration.
+
+## Docs
+
+- [Product and implementation plan](/Users/izotop/izotop vpn/docs/telegram-bot-plan.md)
+- [Remnawave panel in Poland, node in NL](/Users/izotop/izotop vpn/docs/remnawave-poland-panel-nl-node-bot.md)
+
+## Setup
+
+Install Python `3.12`, then:
+
+```bash
+python3.12 -m venv .venv
+source .venv/bin/activate
+pip install -U pip
+pip install -e .
+cp .env.example .env
+```
+
+Run:
+
+```bash
+python -m izotop_connect_bot
+```
+
+The app starts:
+
+- FastAPI server for webhooks and health checks
+- Telegram bot polling loop
+

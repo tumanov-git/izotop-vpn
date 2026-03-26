@@ -1,0 +1,10 @@
+aiogram<4.0,>=3.18
+aiosqlite<1.0,>=0.20
+email-validator<3.0,>=2.2
+fastapi<1.0,>=0.115
+httpx<0.28,>=0.27
+pydantic-settings<3.0,>=2.7
+qrcode[pil]<9.0,>=8.0
+remnawave<2.7,>=2.6.1
+sqlalchemy<3.0,>=2.0.37
+uvicorn[standard]<1.0,>=0.34

@@ -1,0 +1,35 @@
+[project]
+name = "izotop-connect-bot"
+version = "0.1.0"
+description = "Telegram bot for Izotop Connect with Tribute webhooks and Remnawave integration."
+readme = "README.md"
+requires-python = ">=3.12,<3.14"
+dependencies = [
+  "aiogram>=3.18,<4.0",
+  "aiosqlite>=0.20,<1.0",
+  "email-validator>=2.2,<3.0",
+  "fastapi>=0.115,<1.0",
+  "httpx>=0.27,<0.28",
+  "pydantic-settings>=2.7,<3.0",
+  "qrcode[pil]>=8.0,<9.0",
+  "remnawave>=2.6.1,<2.7",
+  "sqlalchemy>=2.0.37,<3.0",
+  "uvicorn[standard]>=0.34,<1.0",
+]
+
+[build-system]
+requires = ["setuptools>=69", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
