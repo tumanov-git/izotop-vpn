@@ -40,13 +40,14 @@ from izotop_connect_bot.bot.texts import (
 )
 from izotop_connect_bot.config import Settings
 from izotop_connect_bot.links import build_happ_link
-from izotop_connect_bot.services.access import PROMO_CODE_MAX_LENGTH, AccessBundle, AccessService
+from izotop_connect_bot.services.access import AccessBundle, AccessService, normalize_promo_code
 
 
 class AdminStates(StatesGroup):
     waiting_for_lookup = State()
     waiting_for_manual_import = State()
-    waiting_for_promo_create = State()
+    waiting_for_promo_code_text = State()
+    waiting_for_promo_create_meta = State()
 
 
 class UserStates(StatesGroup):
@@ -602,9 +603,6 @@ def create_router(access_service: AccessService, settings: Settings) -> Router:
         if not code:
             await message.answer("Введи промокод текстом.")
             return
-        if len(code) > PROMO_CODE_MAX_LENGTH:
-            await message.answer(f"Промокод слишком длинный. Максимум {PROMO_CODE_MAX_LENGTH} символов.")
-            return
         access = await access_service.redeem_promo_code(
             telegram_user_id=message.from_user.id,
             telegram_username=message.from_user.username,
@@ -678,27 +676,43 @@ def create_router(access_service: AccessService, settings: Settings) -> Router:
         if not _is_admin(callback, settings) or not callback.message:
             await callback.answer("Нет доступа", show_alert=True)
             return
-        await state.set_state(AdminStates.waiting_for_promo_create)
+        await state.clear()
+        await state.set_state(AdminStates.waiting_for_promo_code_text)
         await callback.message.answer(
-            "Пришли строку в формате:\n"
-            "<code>Название Длительность Использования</code>\n\n"
-            "Пример:\n"
-            "<code>PROMOCODE 7 30</code>"
+            "Сначала пришли сам промокод целиком отдельным сообщением.\n"
+            "Он может быть длинным и многострочным."
         )
         await callback.answer()
 
-    @router.message(AdminStates.waiting_for_promo_create)
-    async def on_admin_promo_create(message: Message, state: FSMContext) -> None:
+    @router.message(AdminStates.waiting_for_promo_code_text)
+    async def on_admin_promo_code_text(message: Message, state: FSMContext) -> None:
+        if not _is_admin(message, settings):
+            return
+        raw_code = message.text or ""
+        if not normalize_promo_code(raw_code):
+            await message.answer("Промокод не должен быть пустым. Пришли текст промокода ещё раз.")
+            return
+        await state.update_data(promo_code=raw_code)
+        await state.set_state(AdminStates.waiting_for_promo_create_meta)
+        await message.answer(
+            "Теперь пришли вторым сообщением:\n"
+            "<code>Дни Кол-во_юзеров</code>\n\n"
+            "Пример:\n"
+            "<code>7 30</code>"
+        )
+
+    @router.message(AdminStates.waiting_for_promo_create_meta)
+    async def on_admin_promo_create_meta(message: Message, state: FSMContext) -> None:
         if not _is_admin(message, settings):
             return
         parts = (message.text or "").split()
-        if len(parts) != 3:
+        if len(parts) != 2:
             await message.answer(
-                "Нужен формат: <code>Название Длительность Использования</code>.\n"
-                "Пример: <code>PROMOCODE 7 30</code>"
+                "Нужен формат: <code>Дни Кол-во_юзеров</code>.\n"
+                "Пример: <code>7 30</code>"
             )
             return
-        raw_code, raw_duration, raw_usages = parts
+        raw_duration, raw_usages = parts
         try:
             duration_days = int(raw_duration)
             max_usages = int(raw_usages)
@@ -708,23 +722,27 @@ def create_router(access_service: AccessService, settings: Settings) -> Router:
         if duration_days <= 0 or max_usages <= 0:
             await message.answer("Длительность и количество использований должны быть больше нуля.")
             return
-        code = raw_code.strip().upper()
-        if len(code) > PROMO_CODE_MAX_LENGTH:
-            await message.answer(f"Название промокода слишком длинное. Максимум {PROMO_CODE_MAX_LENGTH} символов.")
-            return
+        data = await state.get_data()
+        code = data.get("promo_code", "")
         created = await access_service.admin_create_promo_code(
             code=code,
             duration_days=duration_days,
             max_usages=max_usages,
         )
         if not created:
-            await message.answer("Такой промокод уже существует.")
+            await state.clear()
+            await state.set_state(AdminStates.waiting_for_promo_code_text)
+            await message.answer(
+                "Такой промокод уже существует или невалиден.\n"
+                "Пришли новый текст промокода отдельным сообщением."
+            )
             return
         await message.answer(
             "Промокод создан.\n\n"
-            f"<b>Код:</b> <code>{code}</code>\n"
+            f"<b>Символов в коде:</b> {len(normalize_promo_code(code))}\n"
             f"<b>Длительность:</b> {duration_days} дн.\n"
-            f"<b>Использований:</b> {max_usages}"
+            f"<b>Использований:</b> {max_usages}\n"
+            "<b>Устройств:</b> 1"
         )
         await state.clear()
 

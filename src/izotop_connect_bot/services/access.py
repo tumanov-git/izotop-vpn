@@ -27,8 +27,6 @@ from izotop_connect_bot.repositories import (
 from izotop_connect_bot.services.remnawave import RemnawaveService
 from izotop_connect_bot.services.tribute import TributeEvent, TributeService
 
-PROMO_CODE_MAX_LENGTH = 100
-
 
 @dataclass(slots=True)
 class AccessBundle:
@@ -37,6 +35,13 @@ class AccessBundle:
     vpn_account: Any
     is_active: bool
     expires_at: datetime | None
+
+
+def normalize_promo_code(code: str) -> str:
+    return code.replace("\r\n", "\n").strip()
+
+
+PROMO_DEVICE_LIMIT = 1
 
 
 class AccessService:
@@ -213,6 +218,10 @@ class AccessService:
                 return event
 
             if event.telegram_user_id is not None:
+                existing_subscription = await self.subscriptions.get_subscription(
+                    session,
+                    event.telegram_user_id,
+                )
                 user = await self.users.upsert_user(
                     session,
                     telegram_user_id=event.telegram_user_id,
@@ -220,7 +229,11 @@ class AccessService:
                     first_name=event.telegram_username,
                     language_code=None,
                     is_admin=event.telegram_user_id in self.settings.bot_admin_ids,
-                    device_limit=None,
+                    device_limit=(
+                        self.settings.remnawave_default_device_limit
+                        if existing_subscription and existing_subscription.source == "promo"
+                        else None
+                    ),
                 )
                 expires_at = ensure_utc(event.expires_at)
                 status = "ACTIVE" if expires_at and expires_at > datetime.now(UTC) else "INACTIVE"
@@ -306,8 +319,8 @@ class AccessService:
         duration_days: int,
         max_usages: int,
     ) -> bool:
-        normalized_code = code.strip().upper()
-        if not normalized_code or len(normalized_code) > PROMO_CODE_MAX_LENGTH:
+        normalized_code = normalize_promo_code(code)
+        if not normalized_code:
             return False
         async with session_scope(self.session_factory) as session:
             promo_code = await self.promo_codes.create(
@@ -327,8 +340,8 @@ class AccessService:
         language_code: str | None,
         code: str,
     ) -> AccessBundle | None:
-        normalized_code = code.strip().upper()
-        if not normalized_code or len(normalized_code) > PROMO_CODE_MAX_LENGTH:
+        normalized_code = normalize_promo_code(code)
+        if not normalized_code:
             return None
 
         async with session_scope(self.session_factory) as session:
@@ -368,7 +381,7 @@ class AccessService:
                 first_name=first_name,
                 language_code=language_code,
                 expires_at=expires_at,
-                device_limit=None,
+                device_limit=PROMO_DEVICE_LIMIT,
                 source="promo",
             )
 

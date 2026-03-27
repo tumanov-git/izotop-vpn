@@ -92,7 +92,7 @@ class PromoCode(Base):
     __tablename__ = "promo_codes"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    code: Mapped[str] = mapped_column(String(100), unique=True, index=True, nullable=False)
+    code: Mapped[str] = mapped_column(Text, unique=True, index=True, nullable=False)
     duration_days: Mapped[int] = mapped_column(Integer, nullable=False)
     max_usages: Mapped[int] = mapped_column(Integer, nullable=False)
     used_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
