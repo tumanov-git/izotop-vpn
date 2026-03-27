@@ -34,7 +34,6 @@ def home_keyboard(
                 )
             ]
         )
-        rows.append([InlineKeyboardButton(text="Промокод", callback_data="home:promo")])
         rows.append(
             [
                 InlineKeyboardButton(
@@ -44,6 +43,7 @@ def home_keyboard(
                 )
             ]
         )
+        rows.append([InlineKeyboardButton(text="Промокод", callback_data="home:promo")])
     rows.append(
         [
             InlineKeyboardButton(text="FAQ", callback_data="home:faq"),
