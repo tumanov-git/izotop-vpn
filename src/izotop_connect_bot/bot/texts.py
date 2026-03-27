@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
-from typing import Iterable
+from typing import Iterable, Literal
 
 from izotop_connect_bot.repositories import AdminUserRow, WebhookEventRow
+
+SubscriptionState = Literal["new", "active", "inactive"]
 
 
 DEVICE_GUIDES: dict[str, dict[str, str]] = {
@@ -106,12 +108,18 @@ def format_expiry(expires_at: datetime | None) -> str:
     return expires_at.strftime("%d.%m.%Y %H:%M UTC")
 
 
-def welcome_text(name: str, *, is_active: bool, expires_at: datetime | None) -> str:
-    status_line = (
-        f"<b>Статус:</b> активен до {format_expiry(expires_at)}"
-        if is_active
-        else "<b>Статус:</b> подписка не найдена или уже истекла"
-    )
+def welcome_text(
+    name: str,
+    *,
+    state: SubscriptionState,
+    expires_at: datetime | None,
+) -> str:
+    if state == "active":
+        status_line = f"<b>Статус:</b> активно до {format_expiry(expires_at)}"
+    elif state == "inactive":
+        status_line = "<b>Статус:</b> неактивно"
+    else:
+        status_line = "<b>Статус:</b> новый пользователь"
     return (
         f"Привет, <b>{name}</b>.\n\n"
         f"Добро пожаловать в <b>Izotop Connect</b>.\n"
@@ -130,9 +138,14 @@ def keys_text(*, expires_at: datetime | None, subscription_url: str) -> str:
     )
 
 
-def inactive_access_text() -> str:
+def inactive_access_text(*, state: SubscriptionState) -> str:
+    if state == "new":
+        return (
+            "У тебя пока нет активной подписки.\n\n"
+            "Оформи доступ по кнопке ниже. Если оплата уже прошла, нажми <b>Проверить подписку</b>."
+        )
     return (
-        "Сейчас у тебя нет активной подписки.\n\n"
+        "Сейчас твоя подписка неактивна.\n\n"
         "Если доступ уже должен быть активен, нажми <b>Проверить подписку</b> или напиши в поддержку."
     )
 
