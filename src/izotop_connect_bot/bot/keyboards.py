@@ -3,10 +3,12 @@ from __future__ import annotations
 from aiogram.enums.button_style import ButtonStyle
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 
+from izotop_connect_bot.bot.texts import SubscriptionState
 
-def home_keyboard(*, has_access: bool, is_admin: bool, buy_url: str) -> InlineKeyboardMarkup:
+
+def home_keyboard(*, state: SubscriptionState, is_admin: bool, buy_url: str) -> InlineKeyboardMarkup:
     rows = []
-    if has_access:
+    if state == "active":
         rows.append(
             [
                 InlineKeyboardButton(
@@ -17,11 +19,17 @@ def home_keyboard(*, has_access: bool, is_admin: bool, buy_url: str) -> InlineKe
             ]
         )
         rows.append(
-            [InlineKeyboardButton(text="Мои ключи", callback_data="home:keys", style=ButtonStyle.PRIMARY)]
+            [InlineKeyboardButton(text="Мой доступ", callback_data="home:keys", style=ButtonStyle.PRIMARY)]
         )
     else:
         rows.append(
-            [InlineKeyboardButton(text="Оформить доступ", url=buy_url, style=ButtonStyle.SUCCESS)]
+            [
+                InlineKeyboardButton(
+                    text="Оформить подписку" if state == "new" else "Оплатить подписку",
+                    url=buy_url,
+                    style=ButtonStyle.SUCCESS,
+                )
+            ]
         )
         rows.append(
             [
@@ -32,8 +40,12 @@ def home_keyboard(*, has_access: bool, is_admin: bool, buy_url: str) -> InlineKe
                 )
             ]
         )
-    rows.append([InlineKeyboardButton(text="FAQ", callback_data="home:faq")])
-    rows.append([InlineKeyboardButton(text="Поддержка", callback_data="home:support")])
+    rows.append(
+        [
+            InlineKeyboardButton(text="FAQ", callback_data="home:faq"),
+            InlineKeyboardButton(text="Поддержка", callback_data="home:support"),
+        ]
+    )
     if is_admin:
         rows.append([InlineKeyboardButton(text="Админка", callback_data="admin:menu", style=ButtonStyle.PRIMARY)])
     return InlineKeyboardMarkup(inline_keyboard=rows)
@@ -94,8 +106,6 @@ def faq_keyboard() -> InlineKeyboardMarkup:
             [InlineKeyboardButton(text="Сколько устройств можно подключить?", callback_data="faq:how_many_devices")],
             [InlineKeyboardButton(text="VPN не работает", callback_data="faq:vpn_not_working", style=ButtonStyle.PRIMARY)],
             [InlineKeyboardButton(text="Как продлить доступ?", callback_data="faq:how_to_extend")],
-            [InlineKeyboardButton(text="iPhone", callback_data="faq:iphone_setup")],
-            [InlineKeyboardButton(text="Android", callback_data="faq:android_setup")],
             [InlineKeyboardButton(text="Назад", callback_data="home:root")],
         ]
     )

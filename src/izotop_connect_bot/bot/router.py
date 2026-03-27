@@ -82,7 +82,11 @@ async def _safe_edit_text(
     reply_markup=None,
 ) -> None:
     try:
-        await message.edit_text(text, reply_markup=reply_markup)
+        await message.edit_text(
+            text=text,
+            parse_mode=ParseMode.HTML,
+            reply_markup=reply_markup,
+        )
     except TelegramBadRequest as exc:
         if "message is not modified" not in str(exc):
             raise
@@ -95,7 +99,11 @@ async def _safe_edit_caption(
     reply_markup=None,
 ) -> None:
     try:
-        await message.edit_caption(caption, reply_markup=reply_markup)
+        await message.edit_caption(
+            caption=caption,
+            parse_mode=ParseMode.HTML,
+            reply_markup=reply_markup,
+        )
     except TelegramBadRequest as exc:
         if "message is not modified" not in str(exc):
             raise
@@ -180,7 +188,7 @@ async def _send_dashboard(message: Message, access: AccessBundle, settings: Sett
             expires_at=access.expires_at,
         ),
         reply_markup=home_keyboard(
-            has_access=access.is_active,
+            state=_subscription_state(access),
             is_admin=_is_admin(message, settings),
             buy_url=settings.bot_buy_url,
         ),
@@ -222,7 +230,7 @@ def create_router(access_service: AccessService, settings: Settings) -> Router:
                 expires_at=access.expires_at,
             ),
             reply_markup=home_keyboard(
-                has_access=access.is_active,
+                state=_subscription_state(access),
                 is_admin=_is_admin(callback, settings),
                 buy_url=settings.bot_buy_url,
             ),
@@ -244,7 +252,7 @@ def create_router(access_service: AccessService, settings: Settings) -> Router:
                 expires_at=access.expires_at,
             ),
             reply_markup=home_keyboard(
-                has_access=access.is_active,
+                state=_subscription_state(access),
                 is_admin=_is_admin(callback, settings),
                 buy_url=settings.bot_buy_url,
             ),
@@ -263,7 +271,7 @@ def create_router(access_service: AccessService, settings: Settings) -> Router:
                 access,
                 inactive_access_text(state=_subscription_state(access)),
                 reply_markup=home_keyboard(
-                    has_access=False,
+                    state=_subscription_state(access),
                     is_admin=_is_admin(callback, settings),
                     buy_url=settings.bot_buy_url,
                 ),
@@ -273,7 +281,7 @@ def create_router(access_service: AccessService, settings: Settings) -> Router:
         await _render_user_screen(
             callback.message,
             access,
-            "Выбери устройство. Мы дадим короткую инструкцию и твою подписку.",
+            "Выбери устройство. Мы дадим короткую инструкцию и твой доступ.",
             reply_markup=device_keyboard(prefix="access"),
         )
         await callback.answer()
@@ -302,7 +310,7 @@ def create_router(access_service: AccessService, settings: Settings) -> Router:
                 access,
                 "У тебя пока нет выданного доступа. Нажми <b>Получить доступ</b>, и мы выдадим подписку.",
                 reply_markup=home_keyboard(
-                    has_access=access.is_active,
+                    state=_subscription_state(access),
                     is_admin=_is_admin(callback, settings),
                     buy_url=settings.bot_buy_url,
                 ),
@@ -397,7 +405,7 @@ def create_router(access_service: AccessService, settings: Settings) -> Router:
                 access,
                 inactive_access_text(state=_subscription_state(access)),
                 reply_markup=home_keyboard(
-                    has_access=False,
+                    state=_subscription_state(access),
                     is_admin=_is_admin(callback, settings),
                     buy_url=settings.bot_buy_url,
                 ),

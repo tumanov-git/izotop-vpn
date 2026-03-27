@@ -12,7 +12,7 @@ DEVICE_GUIDES: dict[str, dict[str, str]] = {
     "iphone": {
         "title": "iPhone",
         "body": (
-            "1. Установи <b>Happ</b>.\n"
+            "1. Установи <a href=\"https://apps.apple.com/us/app/happ-proxy-utility/id6504287215\">Happ из App Store</a>.\n"
             "2. Нажми <b>Открыть подписку</b>.\n"
             "3. Импортируй ссылку в Happ.\n"
             "4. Включи профиль и разреши VPN."
@@ -21,7 +21,7 @@ DEVICE_GUIDES: dict[str, dict[str, str]] = {
     "android": {
         "title": "Android",
         "body": (
-            "1. Установи <b>Happ</b>.\n"
+            "1. Установи <a href=\"https://play.google.com/store/apps/details?id=com.happproxy\">Happ из Google Play</a>.\n"
             "2. Открой подписку по ссылке.\n"
             "3. Импортируй профиль в Happ.\n"
             "4. Подключись через созданную запись."
@@ -30,7 +30,7 @@ DEVICE_GUIDES: dict[str, dict[str, str]] = {
     "windows": {
         "title": "Windows",
         "body": (
-            "1. Установи <b>Happ</b>.\n"
+            "1. Установи <a href=\"https://github.com/Happ-proxy/happ-desktop/releases/latest/download/setup-Happ.x64.exe\">Happ для Windows</a>.\n"
             "2. Импортируй <b>subscription URL</b>.\n"
             "3. Выбери сервер <b>Netherlands</b>.\n"
             "4. Подключись."
@@ -39,7 +39,7 @@ DEVICE_GUIDES: dict[str, dict[str, str]] = {
     "macos": {
         "title": "macOS",
         "body": (
-            "1. Установи <b>Happ</b>.\n"
+            "1. Установи <a href=\"https://github.com/Happ-proxy/happ-desktop/releases/latest/download/Happ.macOS.universal.dmg\">Happ для macOS</a>.\n"
             "2. Импортируй подписку.\n"
             "3. Разреши VPN-профиль.\n"
             "4. Подключись к нужному хосту."
@@ -66,10 +66,7 @@ FAQ_ITEMS: dict[str, dict[str, str]] = {
     },
     "how_many_devices": {
         "title": "Сколько устройств можно подключить?",
-        "body": (
-            "В текущей модели у пользователя один VPN-аккаунт и одна подписка, которую можно "
-            "импортировать на несколько устройств."
-        ),
+        "body": "Одна подписка действует на три устройства. Если нужно больше, напиши в Поддержку.",
     },
     "vpn_not_working": {
         "title": "VPN не работает",
@@ -82,18 +79,7 @@ FAQ_ITEMS: dict[str, dict[str, str]] = {
     },
     "how_to_extend": {
         "title": "Как продлить доступ?",
-        "body": (
-            "Если подписка оформлена через Tribute, продление произойдёт автоматически по данным "
-            "webhook. Если доступ не обновился, нажми <b>Проверить подписку</b> или напиши в поддержку."
-        ),
-    },
-    "iphone_setup": {
-        "title": "Как подключиться на iPhone?",
-        "body": DEVICE_GUIDES["iphone"]["body"],
-    },
-    "android_setup": {
-        "title": "Как подключиться на Android?",
-        "body": DEVICE_GUIDES["android"]["body"],
+        "body": "Если подписка оформлена через Tribute, то она продлится автоматически.",
     },
 }
 
@@ -115,17 +101,19 @@ def welcome_text(
     expires_at: datetime | None,
 ) -> str:
     if state == "active":
-        status_line = f"<b>Статус:</b> активно до {format_expiry(expires_at)}"
+        status_line = "Активна"
+        hint_line = "Получить доступ ниже"
     elif state == "inactive":
-        status_line = "<b>Статус:</b> неактивно"
+        status_line = "Закончилась"
+        hint_line = "Оплатить ниже"
     else:
-        status_line = "<b>Статус:</b> новый пользователь"
+        status_line = "Не оформлена"
+        hint_line = "Оформить подписку ниже"
     return (
-        f"Привет, <b>{name}</b>.\n\n"
-        f"Добро пожаловать в <b>Izotop Connect</b>.\n"
-        "Здесь ты можешь получить приватный VPN-доступ, посмотреть свои ключи, "
-        "быстро открыть инструкцию по устройству и написать в поддержку.\n\n"
-        f"{status_line}"
+        f"Привет, {name}!\n\n"
+        "Izotop Connect — быстрое, стабильное и безопасное подключение к интернету\n\n"
+        f"<b>Подписка</b>: {status_line}\n"
+        f"<i>{hint_line}</i>"
     )
 
 
