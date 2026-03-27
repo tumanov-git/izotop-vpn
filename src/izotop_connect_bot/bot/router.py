@@ -15,6 +15,7 @@ from aiogram.types import BufferedInputFile, CallbackQuery, FSInputFile, InputMe
 
 from izotop_connect_bot.bot.keyboards import (
     access_result_keyboard,
+    admin_delete_confirm_keyboard,
     admin_keyboard,
     admin_user_keyboard,
     device_keyboard,
@@ -22,7 +23,6 @@ from izotop_connect_bot.bot.keyboards import (
     faq_keyboard,
     home_keyboard,
     keys_keyboard,
-    support_keyboard,
 )
 from izotop_connect_bot.bot.texts import (
     DEVICE_GUIDES,
@@ -38,6 +38,7 @@ from izotop_connect_bot.bot.texts import (
     welcome_text,
 )
 from izotop_connect_bot.config import Settings
+from izotop_connect_bot.links import build_happ_link
 from izotop_connect_bot.services.access import AccessBundle, AccessService
 
 
@@ -73,6 +74,10 @@ def _subscription_state(access: AccessBundle) -> SubscriptionState:
 
 def _picture_file(state: SubscriptionState) -> FSInputFile:
     return FSInputFile(str(STATUS_PICTURES[state]))
+
+
+def _access_url(settings: Settings, subscription_url: str) -> str:
+    return build_happ_link(settings.app_base_url, subscription_url)
 
 
 async def _safe_edit_text(
@@ -191,6 +196,7 @@ async def _send_dashboard(message: Message, access: AccessBundle, settings: Sett
             state=_subscription_state(access),
             is_admin=_is_admin(message, settings),
             buy_url=settings.bot_buy_url,
+            support_url=settings.bot_support_url,
         ),
         refresh_media=True,
     )
@@ -233,6 +239,7 @@ def create_router(access_service: AccessService, settings: Settings) -> Router:
                 state=_subscription_state(access),
                 is_admin=_is_admin(callback, settings),
                 buy_url=settings.bot_buy_url,
+                support_url=settings.bot_support_url,
             ),
             refresh_media=True,
         )
@@ -255,6 +262,7 @@ def create_router(access_service: AccessService, settings: Settings) -> Router:
                 state=_subscription_state(access),
                 is_admin=_is_admin(callback, settings),
                 buy_url=settings.bot_buy_url,
+                support_url=settings.bot_support_url,
             ),
             refresh_media=True,
         )
@@ -274,6 +282,7 @@ def create_router(access_service: AccessService, settings: Settings) -> Router:
                     state=_subscription_state(access),
                     is_admin=_is_admin(callback, settings),
                     buy_url=settings.bot_buy_url,
+                    support_url=settings.bot_support_url,
                 ),
             )
             await callback.answer()
@@ -313,6 +322,7 @@ def create_router(access_service: AccessService, settings: Settings) -> Router:
                     state=_subscription_state(access),
                     is_admin=_is_admin(callback, settings),
                     buy_url=settings.bot_buy_url,
+                    support_url=settings.bot_support_url,
                 ),
             )
             await callback.answer()
@@ -324,20 +334,7 @@ def create_router(access_service: AccessService, settings: Settings) -> Router:
                 expires_at=access.expires_at,
                 subscription_url=access.vpn_account.subscription_url,
             ),
-            reply_markup=keys_keyboard(access.vpn_account.subscription_url),
-        )
-        await callback.answer()
-
-    @router.callback_query(F.data == "home:support")
-    async def on_support(callback: CallbackQuery) -> None:
-        if not callback.from_user or not callback.message:
-            return
-        access = await access_service.get_access_bundle(callback.from_user.id)
-        await _render_user_screen(
-            callback.message,
-            access,
-            "Если что-то пошло не так, напиши в поддержку. Там же можно уточнить статус оплаты и перенос доступа.",
-            reply_markup=support_keyboard(support_url=settings.bot_support_url),
+            reply_markup=keys_keyboard(_access_url(settings, access.vpn_account.subscription_url)),
         )
         await callback.answer()
 
@@ -367,7 +364,7 @@ def create_router(access_service: AccessService, settings: Settings) -> Router:
             callback.message,
             access,
             faq_text(item_key),
-            reply_markup=faq_item_keyboard(),
+            reply_markup=faq_item_keyboard(support_url=settings.bot_support_url),
         )
         await callback.answer()
 
@@ -408,6 +405,7 @@ def create_router(access_service: AccessService, settings: Settings) -> Router:
                     state=_subscription_state(access),
                     is_admin=_is_admin(callback, settings),
                     buy_url=settings.bot_buy_url,
+                    support_url=settings.bot_support_url,
                 ),
             )
             await callback.answer()
@@ -419,7 +417,7 @@ def create_router(access_service: AccessService, settings: Settings) -> Router:
             access,
             f"<b>{guide['title']}</b>\n\n{guide['body']}\n\n"
             f"{keys_text(expires_at=access.expires_at, subscription_url=account.subscription_url)}",
-            reply_markup=access_result_keyboard(account.subscription_url),
+            reply_markup=access_result_keyboard(_access_url(settings, account.subscription_url)),
             refresh_media=True,
         )
         await callback.answer("Подписка готова")
@@ -694,6 +692,47 @@ def create_router(access_service: AccessService, settings: Settings) -> Router:
         )
         await callback.answer("VPN синхронизирован")
 
+    @router.callback_query(F.data.startswith("admin:delete_prompt:"))
+    async def on_admin_delete_prompt(callback: CallbackQuery) -> None:
+        if not _is_admin(callback, settings) or not callback.message:
+            await callback.answer("Нет доступа", show_alert=True)
+            return
+        telegram_user_id = int(callback.data.split(":")[-1])
+        access = await access_service.admin_find_user(telegram_user_id)
+        if access.user is None and access.subscription is None and access.vpn_account is None:
+            await callback.answer("Пользователь не найден", show_alert=True)
+            return
+        await _render_admin_screen(
+            callback.message,
+            "Удалить пользователя из базы и отключить его доступ?\n\n"
+            f"<b>Telegram ID:</b> <code>{telegram_user_id}</code>",
+            reply_markup=admin_delete_confirm_keyboard(telegram_user_id),
+        )
+        await callback.answer()
+
+    @router.callback_query(F.data.startswith("admin:delete:"))
+    async def on_admin_delete(callback: CallbackQuery) -> None:
+        if not _is_admin(callback, settings) or not callback.message:
+            await callback.answer("Нет доступа", show_alert=True)
+            return
+        telegram_user_id = int(callback.data.split(":")[-1])
+        deleted = await access_service.admin_delete_user(telegram_user_id)
+        if not deleted:
+            await callback.answer("Пользователь не найден", show_alert=True)
+            return
+        stats = await access_service.admin_get_stats()
+        await _render_admin_screen(
+            callback.message,
+            admin_stats_text(
+                stats.total_users,
+                stats.active_subscriptions,
+                stats.vpn_accounts,
+                stats.processed_webhooks,
+            ),
+            reply_markup=admin_keyboard(),
+        )
+        await callback.answer("Пользователь удалён")
+
     @router.callback_query(F.data.startswith("admin:key:"))
     async def on_admin_key(callback: CallbackQuery) -> None:
         if not _is_admin(callback, settings):
@@ -709,7 +748,7 @@ def create_router(access_service: AccessService, settings: Settings) -> Router:
                 expires_at=access.expires_at,
                 subscription_url=access.vpn_account.subscription_url,
             ),
-            reply_markup=keys_keyboard(access.vpn_account.subscription_url),
+            reply_markup=keys_keyboard(_access_url(settings, access.vpn_account.subscription_url)),
         )
         await callback.answer()
 

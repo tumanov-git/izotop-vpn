@@ -261,3 +261,14 @@ class AccessService:
                     subscription_url=remote.subscription_url,
                 )
         return await self.get_access_bundle(telegram_user_id)
+
+    async def admin_delete_user(self, telegram_user_id: int) -> bool:
+        remote = await self.remnawave.get_user_by_telegram_id(telegram_user_id)
+        if remote is not None:
+            await self.remnawave.disable_user(str(remote.uuid))
+
+        async with session_scope(self.session_factory) as session:
+            deleted_account = await self.vpn_accounts.delete_account(session, telegram_user_id)
+            deleted_subscription = await self.subscriptions.delete_subscription(session, telegram_user_id)
+            deleted_user = await self.users.delete_user(session, telegram_user_id)
+            return any((remote is not None, deleted_account, deleted_subscription, deleted_user))

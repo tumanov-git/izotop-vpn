@@ -2,15 +2,18 @@ from __future__ import annotations
 
 import asyncio
 from contextlib import asynccontextmanager, suppress
+from urllib.parse import urlsplit
 
 from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
+from fastapi.responses import RedirectResponse
 from fastapi import FastAPI, HTTPException, Request
 
 from izotop_connect_bot.bot.router import create_router
 from izotop_connect_bot.config import Settings
 from izotop_connect_bot.db import create_engine, create_session_factory, init_db
+from izotop_connect_bot.links import build_happ_deeplink
 from izotop_connect_bot.services.access import AccessService
 from izotop_connect_bot.services.remnawave import RemnawaveService
 from izotop_connect_bot.services.tribute import TributeService
@@ -72,6 +75,13 @@ def create_app(settings: Settings) -> FastAPI:
     @app.get("/healthz")
     async def healthz() -> dict[str, str]:
         return {"status": "ok"}
+
+    @app.get("/happlink", include_in_schema=False)
+    async def happ_link(link: str) -> RedirectResponse:
+        parsed = urlsplit(link)
+        if parsed.scheme not in {"http", "https"}:
+            raise HTTPException(status_code=400, detail="Invalid subscription link")
+        return RedirectResponse(url=build_happ_deeplink(link), status_code=307)
 
     @app.post(settings.webhook_path)
     async def tribute_webhook(request: Request) -> dict[str, str]:

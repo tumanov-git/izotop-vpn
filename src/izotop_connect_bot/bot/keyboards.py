@@ -6,7 +6,13 @@ from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 from izotop_connect_bot.bot.texts import SubscriptionState
 
 
-def home_keyboard(*, state: SubscriptionState, is_admin: bool, buy_url: str) -> InlineKeyboardMarkup:
+def home_keyboard(
+    *,
+    state: SubscriptionState,
+    is_admin: bool,
+    buy_url: str,
+    support_url: str,
+) -> InlineKeyboardMarkup:
     rows = []
     if state == "active":
         rows.append(
@@ -18,9 +24,6 @@ def home_keyboard(*, state: SubscriptionState, is_admin: bool, buy_url: str) -> 
                 )
             ]
         )
-        rows.append(
-            [InlineKeyboardButton(text="Мой доступ", callback_data="home:keys", style=ButtonStyle.PRIMARY)]
-        )
     else:
         rows.append(
             [
@@ -31,19 +34,10 @@ def home_keyboard(*, state: SubscriptionState, is_admin: bool, buy_url: str) -> 
                 )
             ]
         )
-        rows.append(
-            [
-                InlineKeyboardButton(
-                    text="Проверить подписку",
-                    callback_data="home:refresh",
-                    style=ButtonStyle.PRIMARY,
-                )
-            ]
-        )
     rows.append(
         [
             InlineKeyboardButton(text="FAQ", callback_data="home:faq"),
-            InlineKeyboardButton(text="Поддержка", callback_data="home:support"),
+            InlineKeyboardButton(text="Поддержка", url=support_url),
         ]
     )
     if is_admin:
@@ -71,7 +65,7 @@ def device_keyboard(*, prefix: str) -> InlineKeyboardMarkup:
 def access_result_keyboard(subscription_url: str) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
-            [InlineKeyboardButton(text="Открыть подписку", url=subscription_url, style=ButtonStyle.SUCCESS)],
+            [InlineKeyboardButton(text="Открыть доступ", url=subscription_url, style=ButtonStyle.SUCCESS)],
             [InlineKeyboardButton(text="Показать QR", callback_data="key:qr", style=ButtonStyle.PRIMARY)],
             [InlineKeyboardButton(text="Назад", callback_data="home:root")],
         ]
@@ -81,19 +75,9 @@ def access_result_keyboard(subscription_url: str) -> InlineKeyboardMarkup:
 def keys_keyboard(subscription_url: str) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
-            [InlineKeyboardButton(text="Открыть подписку", url=subscription_url, style=ButtonStyle.SUCCESS)],
+            [InlineKeyboardButton(text="Открыть доступ", url=subscription_url, style=ButtonStyle.SUCCESS)],
             [InlineKeyboardButton(text="Показать QR", callback_data="key:qr", style=ButtonStyle.PRIMARY)],
             [InlineKeyboardButton(text="Обновить", callback_data="home:refresh")],
-            [InlineKeyboardButton(text="Назад", callback_data="home:root")],
-        ]
-    )
-
-
-def support_keyboard(*, support_url: str) -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(
-        inline_keyboard=[
-            [InlineKeyboardButton(text="Написать в поддержку", url=support_url, style=ButtonStyle.PRIMARY)],
-            [InlineKeyboardButton(text="FAQ", callback_data="home:faq")],
             [InlineKeyboardButton(text="Назад", callback_data="home:root")],
         ]
     )
@@ -102,21 +86,22 @@ def support_keyboard(*, support_url: str) -> InlineKeyboardMarkup:
 def faq_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
+            [InlineKeyboardButton(text="VPN не работает", callback_data="faq:vpn_not_working", style=ButtonStyle.PRIMARY)],
             [InlineKeyboardButton(text="Что такое subscription URL?", callback_data="faq:what_is_subscription")],
             [InlineKeyboardButton(text="Сколько устройств можно подключить?", callback_data="faq:how_many_devices")],
-            [InlineKeyboardButton(text="VPN не работает", callback_data="faq:vpn_not_working", style=ButtonStyle.PRIMARY)],
             [InlineKeyboardButton(text="Как продлить доступ?", callback_data="faq:how_to_extend")],
             [InlineKeyboardButton(text="Назад", callback_data="home:root")],
         ]
     )
 
 
-def faq_item_keyboard() -> InlineKeyboardMarkup:
+def faq_item_keyboard(*, support_url: str) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
-            [InlineKeyboardButton(text="К FAQ", callback_data="home:faq", style=ButtonStyle.PRIMARY)],
-            [InlineKeyboardButton(text="Поддержка", callback_data="home:support")],
-            [InlineKeyboardButton(text="Назад", callback_data="home:root")],
+            [
+                InlineKeyboardButton(text="Поддержка", url=support_url, style=ButtonStyle.PRIMARY),
+                InlineKeyboardButton(text="Назад", callback_data="home:faq"),
+            ],
         ]
     )
 
@@ -156,11 +141,33 @@ def admin_user_keyboard(telegram_user_id: int, *, has_access: bool) -> InlineKey
             1,
             [
                 InlineKeyboardButton(
-                    text="Открыть подписку",
+                    text="Открыть доступ",
                     callback_data=f"admin:key:{telegram_user_id}",
                     style=ButtonStyle.PRIMARY,
                 )
             ],
         )
+    rows.append(
+        [
+            InlineKeyboardButton(
+                text="Удалить пользователя",
+                callback_data=f"admin:delete_prompt:{telegram_user_id}",
+            )
+        ]
+    )
     rows.append([InlineKeyboardButton(text="Назад в админку", callback_data="admin:menu")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def admin_delete_confirm_keyboard(telegram_user_id: int) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text="Удалить пользователя",
+                    callback_data=f"admin:delete:{telegram_user_id}",
+                )
+            ],
+            [InlineKeyboardButton(text="Назад", callback_data=f"admin:view:{telegram_user_id}")],
+        ]
+    )

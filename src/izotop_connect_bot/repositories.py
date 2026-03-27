@@ -84,6 +84,13 @@ class UserRepository:
     async def get_user(self, session: AsyncSession, telegram_user_id: int) -> User | None:
         return await session.get(User, telegram_user_id)
 
+    async def delete_user(self, session: AsyncSession, telegram_user_id: int) -> bool:
+        user = await self.get_user(session, telegram_user_id)
+        if user is None:
+            return False
+        await session.delete(user)
+        return True
+
     async def search_by_telegram_id(
         self, session: AsyncSession, telegram_user_id: int
     ) -> User | None:
@@ -182,11 +189,25 @@ class SubscriptionRepository:
         query = select(Subscription).where(Subscription.telegram_user_id == telegram_user_id)
         return (await session.execute(query)).scalar_one_or_none()
 
+    async def delete_subscription(self, session: AsyncSession, telegram_user_id: int) -> bool:
+        subscription = await self.get_subscription(session, telegram_user_id)
+        if subscription is None:
+            return False
+        await session.delete(subscription)
+        return True
+
 
 class VpnAccountRepository:
     async def get_account(self, session: AsyncSession, telegram_user_id: int) -> VpnAccount | None:
         query = select(VpnAccount).where(VpnAccount.telegram_user_id == telegram_user_id)
         return (await session.execute(query)).scalar_one_or_none()
+
+    async def delete_account(self, session: AsyncSession, telegram_user_id: int) -> bool:
+        account = await self.get_account(session, telegram_user_id)
+        if account is None:
+            return False
+        await session.delete(account)
+        return True
 
     async def upsert_account(
         self,
