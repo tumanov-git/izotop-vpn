@@ -7,7 +7,15 @@ from typing import Any
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from izotop_connect_bot.models import ManualImport, Subscription, User, VpnAccount, WebhookEvent
+from izotop_connect_bot.models import (
+    ManualImport,
+    PromoCode,
+    PromoCodeRedemption,
+    Subscription,
+    User,
+    VpnAccount,
+    WebhookEvent,
+)
 
 
 def utcnow() -> datetime:
@@ -292,6 +300,71 @@ class ManualImportRepository:
         for item in items:
             await session.delete(item)
         return len(items)
+
+
+class PromoCodeRepository:
+    async def create(
+        self,
+        session: AsyncSession,
+        *,
+        code: str,
+        duration_days: int,
+        max_usages: int,
+    ) -> PromoCode | None:
+        existing = await self.get_by_code(session, code)
+        if existing is not None:
+            return None
+        promo_code = PromoCode(
+            code=code,
+            duration_days=duration_days,
+            max_usages=max_usages,
+            used_count=0,
+            is_active=True,
+        )
+        session.add(promo_code)
+        return promo_code
+
+    async def get_by_code(self, session: AsyncSession, code: str) -> PromoCode | None:
+        query = select(PromoCode).where(PromoCode.code == code)
+        return (await session.execute(query)).scalar_one_or_none()
+
+    async def has_available_uses(self, promo_code: PromoCode) -> bool:
+        return promo_code.is_active and promo_code.used_count < promo_code.max_usages
+
+    async def increment_usage(self, promo_code: PromoCode) -> PromoCode:
+        promo_code.used_count += 1
+        return promo_code
+
+
+class PromoCodeRedemptionRepository:
+    async def has_user_redeemed(
+        self,
+        session: AsyncSession,
+        *,
+        promo_code_id: int,
+        telegram_user_id: int,
+    ) -> bool:
+        query = select(PromoCodeRedemption.id).where(
+            PromoCodeRedemption.promo_code_id == promo_code_id,
+            PromoCodeRedemption.telegram_user_id == telegram_user_id,
+        )
+        return (await session.execute(query)).scalar_one_or_none() is not None
+
+    async def add(
+        self,
+        session: AsyncSession,
+        *,
+        promo_code_id: int,
+        telegram_user_id: int,
+        expires_at: datetime,
+    ) -> PromoCodeRedemption:
+        redemption = PromoCodeRedemption(
+            promo_code_id=promo_code_id,
+            telegram_user_id=telegram_user_id,
+            expires_at=ensure_utc(expires_at),
+        )
+        session.add(redemption)
+        return redemption
 
 
 def subscription_is_active(subscription: Subscription | None) -> bool:

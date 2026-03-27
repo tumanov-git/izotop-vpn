@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from aiogram.types import User as TgUser
@@ -13,6 +13,8 @@ from izotop_connect_bot.repositories import (
     AdminUserRow,
     DashboardStats,
     ManualImportRepository,
+    PromoCodeRedemptionRepository,
+    PromoCodeRepository,
     SubscriptionRepository,
     UserRepository,
     VpnAccountRepository,
@@ -24,6 +26,8 @@ from izotop_connect_bot.repositories import (
 )
 from izotop_connect_bot.services.remnawave import RemnawaveService
 from izotop_connect_bot.services.tribute import TributeEvent, TributeService
+
+PROMO_CODE_MAX_LENGTH = 100
 
 
 @dataclass(slots=True)
@@ -53,6 +57,70 @@ class AccessService:
         self.vpn_accounts = VpnAccountRepository()
         self.webhook_events = WebhookEventRepository()
         self.manual_imports = ManualImportRepository()
+        self.promo_codes = PromoCodeRepository()
+        self.promo_redemptions = PromoCodeRedemptionRepository()
+
+    async def _grant_active_subscription(
+        self,
+        session: AsyncSession,
+        *,
+        telegram_user_id: int,
+        telegram_username: str | None,
+        first_name: str | None,
+        language_code: str | None,
+        expires_at: datetime,
+        device_limit: int | None,
+        source: str,
+        imported_by_admin: int | None = None,
+        note: str | None = None,
+    ) -> AccessBundle:
+        user = await self.users.upsert_user(
+            session,
+            telegram_user_id=telegram_user_id,
+            telegram_username=telegram_username,
+            first_name=first_name,
+            language_code=language_code,
+            is_admin=telegram_user_id in self.settings.bot_admin_ids,
+            device_limit=device_limit or self.settings.remnawave_default_device_limit,
+        )
+        await self.subscriptions.upsert_subscription(
+            session,
+            telegram_user_id=telegram_user_id,
+            tribute_subscription_id=None,
+            period_id=None,
+            channel_id=None,
+            status="ACTIVE",
+            expires_at=ensure_utc(expires_at),
+            cancelled=False,
+            source=source,
+        )
+        if imported_by_admin is not None:
+            await self.manual_imports.add(
+                session,
+                telegram_user_id=telegram_user_id,
+                expires_at=ensure_utc(expires_at),
+                note=note,
+                imported_by_admin=imported_by_admin,
+            )
+        remote = await self.remnawave.sync_access(
+            telegram_user_id=user.telegram_user_id,
+            telegram_username=user.telegram_username,
+            first_name=user.first_name,
+            expires_at=ensure_utc(expires_at),
+            device_limit=user.device_limit,
+        )
+        vpn_account = await self.vpn_accounts.get_account(session, telegram_user_id)
+        if remote is not None and getattr(remote, "subscription_url", None):
+            vpn_account = await self.vpn_accounts.upsert_account(
+                session,
+                telegram_user_id=user.telegram_user_id,
+                remnawave_user_uuid=str(remote.uuid),
+                remnawave_username=remote.username,
+                subscription_url=remote.subscription_url,
+            )
+        subscription = await self.subscriptions.get_subscription(session, telegram_user_id)
+        model = user_view_model(user, subscription, vpn_account)
+        return AccessBundle(**model)
 
     async def register_telegram_user(self, tg_user: TgUser) -> Any:
         async with session_scope(self.session_factory) as session:
@@ -218,49 +286,91 @@ class AccessService:
         imported_by_admin: int,
     ) -> AccessBundle:
         async with session_scope(self.session_factory) as session:
-            user = await self.users.upsert_user(
+            return await self._grant_active_subscription(
                 session,
                 telegram_user_id=telegram_user_id,
                 telegram_username=None,
                 first_name=None,
                 language_code=None,
-                is_admin=telegram_user_id in self.settings.bot_admin_ids,
-                device_limit=device_limit or self.settings.remnawave_default_device_limit,
-            )
-            await self.subscriptions.upsert_subscription(
-                session,
-                telegram_user_id=telegram_user_id,
-                tribute_subscription_id=None,
-                period_id=None,
-                channel_id=None,
-                status="ACTIVE",
-                expires_at=ensure_utc(expires_at),
-                cancelled=False,
+                expires_at=expires_at,
+                device_limit=device_limit,
                 source="manual",
+                imported_by_admin=imported_by_admin,
+                note=note,
             )
-            await self.manual_imports.add(
+
+    async def admin_create_promo_code(
+        self,
+        *,
+        code: str,
+        duration_days: int,
+        max_usages: int,
+    ) -> bool:
+        normalized_code = code.strip().upper()
+        if not normalized_code or len(normalized_code) > PROMO_CODE_MAX_LENGTH:
+            return False
+        async with session_scope(self.session_factory) as session:
+            promo_code = await self.promo_codes.create(
+                session,
+                code=normalized_code,
+                duration_days=duration_days,
+                max_usages=max_usages,
+            )
+            return promo_code is not None
+
+    async def redeem_promo_code(
+        self,
+        *,
+        telegram_user_id: int,
+        telegram_username: str | None,
+        first_name: str | None,
+        language_code: str | None,
+        code: str,
+    ) -> AccessBundle | None:
+        normalized_code = code.strip().upper()
+        if not normalized_code or len(normalized_code) > PROMO_CODE_MAX_LENGTH:
+            return None
+
+        async with session_scope(self.session_factory) as session:
+            existing_subscription = await self.subscriptions.get_subscription(session, telegram_user_id)
+            if subscription_is_active(existing_subscription):
+                model = user_view_model(
+                    await self.users.get_user(session, telegram_user_id),
+                    existing_subscription,
+                    await self.vpn_accounts.get_account(session, telegram_user_id),
+                )
+                return AccessBundle(**model)
+
+            promo_code = await self.promo_codes.get_by_code(session, normalized_code)
+            if promo_code is None:
+                return None
+            if not promo_code.is_active or promo_code.used_count >= promo_code.max_usages:
+                return None
+            if await self.promo_redemptions.has_user_redeemed(
+                session,
+                promo_code_id=promo_code.id,
+                telegram_user_id=telegram_user_id,
+            ):
+                return None
+
+            expires_at = datetime.now(UTC) + timedelta(days=promo_code.duration_days)
+            await self.promo_redemptions.add(
+                session,
+                promo_code_id=promo_code.id,
+                telegram_user_id=telegram_user_id,
+                expires_at=expires_at,
+            )
+            await self.promo_codes.increment_usage(promo_code)
+            return await self._grant_active_subscription(
                 session,
                 telegram_user_id=telegram_user_id,
-                expires_at=ensure_utc(expires_at),
-                note=note,
-                imported_by_admin=imported_by_admin,
+                telegram_username=telegram_username,
+                first_name=first_name,
+                language_code=language_code,
+                expires_at=expires_at,
+                device_limit=None,
+                source="promo",
             )
-            remote = await self.remnawave.sync_access(
-                telegram_user_id=user.telegram_user_id,
-                telegram_username=user.telegram_username,
-                first_name=user.first_name,
-                expires_at=ensure_utc(expires_at),
-                device_limit=user.device_limit,
-            )
-            if remote is not None and getattr(remote, "subscription_url", None):
-                await self.vpn_accounts.upsert_account(
-                    session,
-                    telegram_user_id=user.telegram_user_id,
-                    remnawave_user_uuid=str(remote.uuid),
-                    remnawave_username=remote.username,
-                    subscription_url=remote.subscription_url,
-                )
-        return await self.get_access_bundle(telegram_user_id)
 
     async def admin_delete_user(self, telegram_user_id: int) -> bool:
         remote = await self.remnawave.get_user_by_telegram_id(telegram_user_id)

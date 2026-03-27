@@ -23,6 +23,7 @@ from izotop_connect_bot.bot.keyboards import (
     faq_keyboard,
     home_keyboard,
     keys_keyboard,
+    promo_entry_keyboard,
 )
 from izotop_connect_bot.bot.texts import (
     DEVICE_GUIDES,
@@ -39,12 +40,17 @@ from izotop_connect_bot.bot.texts import (
 )
 from izotop_connect_bot.config import Settings
 from izotop_connect_bot.links import build_happ_link
-from izotop_connect_bot.services.access import AccessBundle, AccessService
+from izotop_connect_bot.services.access import PROMO_CODE_MAX_LENGTH, AccessBundle, AccessService
 
 
 class AdminStates(StatesGroup):
     waiting_for_lookup = State()
     waiting_for_manual_import = State()
+    waiting_for_promo_create = State()
+
+
+class UserStates(StatesGroup):
+    waiting_for_promo_code = State()
 
 
 PICS_DIR = Path(__file__).resolve().parent.parent / "pics"
@@ -267,6 +273,23 @@ def create_router(access_service: AccessService, settings: Settings) -> Router:
             refresh_media=True,
         )
         await callback.answer("Статус обновлён")
+
+    @router.callback_query(F.data == "home:promo")
+    async def on_promo_prompt(callback: CallbackQuery, state: FSMContext) -> None:
+        if not callback.from_user or not callback.message:
+            return
+        access = await access_service.get_access_bundle(callback.from_user.id)
+        if _subscription_state(access) == "active":
+            await callback.answer("Промокод сейчас не нужен", show_alert=True)
+            return
+        await state.set_state(UserStates.waiting_for_promo_code)
+        await _render_user_screen(
+            callback.message,
+            access,
+            "Введи промокод, который у тебя есть",
+            reply_markup=promo_entry_keyboard(),
+        )
+        await callback.answer()
 
     @router.callback_query(F.data == "home:access")
     async def on_access(callback: CallbackQuery) -> None:
@@ -571,6 +594,30 @@ def create_router(access_service: AccessService, settings: Settings) -> Router:
         )
         await state.clear()
 
+    @router.message(UserStates.waiting_for_promo_code)
+    async def on_user_promo_code(message: Message, state: FSMContext) -> None:
+        if not message.from_user:
+            return
+        code = (message.text or "").strip()
+        if not code:
+            await message.answer("Введи промокод текстом.")
+            return
+        if len(code) > PROMO_CODE_MAX_LENGTH:
+            await message.answer(f"Промокод слишком длинный. Максимум {PROMO_CODE_MAX_LENGTH} символов.")
+            return
+        access = await access_service.redeem_promo_code(
+            telegram_user_id=message.from_user.id,
+            telegram_username=message.from_user.username,
+            first_name=message.from_user.first_name,
+            language_code=message.from_user.language_code,
+            code=code,
+        )
+        if access is None:
+            await message.answer("Промокод неверный.")
+            return
+        await state.clear()
+        await _send_dashboard(message, access, settings)
+
     @router.message(AdminStates.waiting_for_manual_import)
     async def on_admin_manual_import(message: Message, state: FSMContext) -> None:
         if not _is_admin(message, settings):
@@ -623,6 +670,61 @@ def create_router(access_service: AccessService, settings: Settings) -> Router:
                 remnawave_username=access.vpn_account.remnawave_username if access.vpn_account else None,
             ),
             reply_markup=admin_user_keyboard(telegram_user_id, has_access=access.vpn_account is not None),
+        )
+        await state.clear()
+
+    @router.callback_query(F.data == "admin:promo_prompt")
+    async def on_admin_promo_prompt(callback: CallbackQuery, state: FSMContext) -> None:
+        if not _is_admin(callback, settings) or not callback.message:
+            await callback.answer("Нет доступа", show_alert=True)
+            return
+        await state.set_state(AdminStates.waiting_for_promo_create)
+        await callback.message.answer(
+            "Пришли строку в формате:\n"
+            "<code>Название Длительность Использования</code>\n\n"
+            "Пример:\n"
+            "<code>PROMOCODE 7 30</code>"
+        )
+        await callback.answer()
+
+    @router.message(AdminStates.waiting_for_promo_create)
+    async def on_admin_promo_create(message: Message, state: FSMContext) -> None:
+        if not _is_admin(message, settings):
+            return
+        parts = (message.text or "").split()
+        if len(parts) != 3:
+            await message.answer(
+                "Нужен формат: <code>Название Длительность Использования</code>.\n"
+                "Пример: <code>PROMOCODE 7 30</code>"
+            )
+            return
+        raw_code, raw_duration, raw_usages = parts
+        try:
+            duration_days = int(raw_duration)
+            max_usages = int(raw_usages)
+        except ValueError:
+            await message.answer("Длительность и количество использований должны быть числами.")
+            return
+        if duration_days <= 0 or max_usages <= 0:
+            await message.answer("Длительность и количество использований должны быть больше нуля.")
+            return
+        code = raw_code.strip().upper()
+        if len(code) > PROMO_CODE_MAX_LENGTH:
+            await message.answer(f"Название промокода слишком длинное. Максимум {PROMO_CODE_MAX_LENGTH} символов.")
+            return
+        created = await access_service.admin_create_promo_code(
+            code=code,
+            duration_days=duration_days,
+            max_usages=max_usages,
+        )
+        if not created:
+            await message.answer("Такой промокод уже существует.")
+            return
+        await message.answer(
+            "Промокод создан.\n\n"
+            f"<b>Код:</b> <code>{code}</code>\n"
+            f"<b>Длительность:</b> {duration_days} дн.\n"
+            f"<b>Использований:</b> {max_usages}"
         )
         await state.clear()
 

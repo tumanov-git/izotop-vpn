@@ -34,10 +34,11 @@ def home_keyboard(
                 )
             ]
         )
+        rows.append([InlineKeyboardButton(text="Промокод", callback_data="home:promo")])
         rows.append(
             [
                 InlineKeyboardButton(
-                    text="Я оплатил",
+                    text="Я оплатил(а)",
                     callback_data="home:refresh",
                     style=ButtonStyle.PRIMARY,
                 )
@@ -104,6 +105,14 @@ def faq_keyboard() -> InlineKeyboardMarkup:
     )
 
 
+def promo_entry_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="Назад", callback_data="home:root")],
+        ]
+    )
+
+
 def faq_item_keyboard(*, support_url: str) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
@@ -124,6 +133,7 @@ def admin_keyboard() -> InlineKeyboardMarkup:
             [InlineKeyboardButton(text="Статистика", callback_data="admin:stats")],
             [InlineKeyboardButton(text="Найти пользователя", callback_data="admin:find_prompt")],
             [InlineKeyboardButton(text="Импортировать вручную", callback_data="admin:import_prompt")],
+            [InlineKeyboardButton(text="Создать промокод", callback_data="admin:promo_prompt")],
             [InlineKeyboardButton(text="Назад", callback_data="home:root")],
         ]
     )
