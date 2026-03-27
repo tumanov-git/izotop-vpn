@@ -34,6 +34,15 @@ def home_keyboard(
                 )
             ]
         )
+        rows.append(
+            [
+                InlineKeyboardButton(
+                    text="Я оплатил",
+                    callback_data="home:refresh",
+                    style=ButtonStyle.PRIMARY,
+                )
+            ]
+        )
     rows.append(
         [
             InlineKeyboardButton(text="FAQ", callback_data="home:faq"),

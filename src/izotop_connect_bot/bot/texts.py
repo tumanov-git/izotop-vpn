@@ -6,13 +6,29 @@ from typing import Iterable, Literal
 from izotop_connect_bot.repositories import AdminUserRow, WebhookEventRow
 
 SubscriptionState = Literal["new", "active", "inactive"]
+RUS_MONTHS = (
+    "января",
+    "февраля",
+    "марта",
+    "апреля",
+    "мая",
+    "июня",
+    "июля",
+    "августа",
+    "сентября",
+    "октября",
+    "ноября",
+    "декабря",
+)
 
 
 DEVICE_GUIDES: dict[str, dict[str, str]] = {
     "iphone": {
         "title": "iPhone",
         "body": (
-            "1. Установи <a href=\"https://apps.apple.com/us/app/happ-proxy-utility/id6504287215\">Happ из App Store</a>.\n"
+            "1. Установи Happ из App Store. Регион:\n"
+            "RU: <a href=\"https://apps.apple.com/ru/app/happ-proxy-utility-plus/id6746188973\">нажать</a>\n"
+            "Other: <a href=\"https://apps.apple.com/us/app/happ-proxy-utility/id6504287215\">нажать</a>\n"
             "2. Нажми <b>Открыть доступ</b>.\n"
             "3. Импортируй ссылку в Happ.\n"
             "4. Включи профиль и разреши VPN."
@@ -94,6 +110,17 @@ def format_expiry(expires_at: datetime | None) -> str:
     return expires_at.strftime("%d.%m.%Y %H:%M UTC")
 
 
+def format_expiry_long_date(expires_at: datetime | None) -> str:
+    if expires_at is None:
+        return "не задана"
+    if expires_at.tzinfo is None:
+        expires_at = expires_at.replace(tzinfo=UTC)
+    else:
+        expires_at = expires_at.astimezone(UTC)
+    month = RUS_MONTHS[expires_at.month - 1]
+    return f"{expires_at.day} {month} {expires_at.year} года"
+
+
 def welcome_text(
     name: str,
     *,
@@ -101,7 +128,7 @@ def welcome_text(
     expires_at: datetime | None,
 ) -> str:
     if state == "active":
-        status_line = "Активна"
+        status_line = f"Активна\nдо {format_expiry_long_date(expires_at)}"
         hint_line = "Получить доступ ниже"
     elif state == "inactive":
         status_line = "Закончилась"
@@ -113,7 +140,7 @@ def welcome_text(
         f"Привет, {name}!\n\n"
         "Izotop Connect — быстрое, стабильное и безопасное подключение к интернету\n\n"
         f"<b>Подписка</b>: {status_line}\n"
-        f"<i>{hint_line}</i>"
+        f"\n<i>{hint_line}</i>"
     )
 
 
@@ -130,11 +157,11 @@ def inactive_access_text(*, state: SubscriptionState) -> str:
     if state == "new":
         return (
             "У тебя пока нет активной подписки.\n\n"
-            "Оформи доступ по кнопке ниже. Если оплата уже прошла, немного подожди или напиши в поддержку."
+            "Оформи доступ по кнопке ниже. Если оплата уже прошла, нажми <b>Я оплатил</b>."
         )
     return (
         "Сейчас твоя подписка неактивна.\n\n"
-        "Если доступ уже должен быть активен, напиши в поддержку."
+        "Если доступ уже должен быть активен, нажми <b>Я оплатил</b> или напиши в поддержку."
     )
 
 

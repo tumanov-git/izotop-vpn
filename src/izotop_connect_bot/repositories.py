@@ -286,6 +286,13 @@ class ManualImportRepository:
         session.add(item)
         return item
 
+    async def delete_for_user(self, session: AsyncSession, telegram_user_id: int) -> int:
+        query = select(ManualImport).where(ManualImport.telegram_user_id == telegram_user_id)
+        items = (await session.execute(query)).scalars().all()
+        for item in items:
+            await session.delete(item)
+        return len(items)
+
 
 def subscription_is_active(subscription: Subscription | None) -> bool:
     if subscription is None or subscription.expires_at is None:

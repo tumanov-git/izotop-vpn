@@ -268,7 +268,16 @@ class AccessService:
             await self.remnawave.disable_user(str(remote.uuid))
 
         async with session_scope(self.session_factory) as session:
+            deleted_manual_imports = await self.manual_imports.delete_for_user(session, telegram_user_id)
             deleted_account = await self.vpn_accounts.delete_account(session, telegram_user_id)
             deleted_subscription = await self.subscriptions.delete_subscription(session, telegram_user_id)
             deleted_user = await self.users.delete_user(session, telegram_user_id)
-            return any((remote is not None, deleted_account, deleted_subscription, deleted_user))
+            return any(
+                (
+                    remote is not None,
+                    bool(deleted_manual_imports),
+                    deleted_account,
+                    deleted_subscription,
+                    deleted_user,
+                )
+            )
