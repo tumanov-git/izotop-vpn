@@ -1,13 +1,15 @@
 from __future__ import annotations
 
+import asyncio
 from datetime import UTC, datetime
+from html import escape
 from io import BytesIO
 from pathlib import Path
 
 import qrcode
 from aiogram import F, Router
 from aiogram.enums import ParseMode
-from aiogram.exceptions import TelegramBadRequest
+from aiogram.exceptions import TelegramBadRequest, TelegramForbiddenError, TelegramRetryAfter
 from aiogram.filters import CommandStart
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
@@ -15,9 +17,13 @@ from aiogram.types import BufferedInputFile, CallbackQuery, FSInputFile, InputMe
 
 from izotop_connect_bot.bot.keyboards import (
     access_result_keyboard,
+    admin_broadcast_confirm_keyboard,
+    admin_broadcast_menu_keyboard,
+    admin_cancel_keyboard,
     admin_delete_confirm_keyboard,
     admin_keyboard,
     admin_user_keyboard,
+    admin_users_pagination_keyboard,
     device_keyboard,
     faq_item_keyboard,
     faq_keyboard,
@@ -29,13 +35,15 @@ from izotop_connect_bot.bot.texts import (
     DEVICE_GUIDES,
     FAQ_ITEMS,
     SubscriptionState,
+    admin_broadcast_confirm_text,
+    admin_broadcast_menu_text,
     admin_user_card_text,
     admin_stats_text,
-    admin_users_list_text,
     admin_webhooks_text,
     faq_text,
     inactive_access_text,
     keys_text,
+    paginated_admin_users_list_text,
     welcome_text,
 )
 from izotop_connect_bot.config import Settings
@@ -46,8 +54,13 @@ from izotop_connect_bot.services.access import AccessBundle, AccessService, norm
 class AdminStates(StatesGroup):
     waiting_for_lookup = State()
     waiting_for_manual_import = State()
+    waiting_for_extend_access = State()
+    waiting_for_device_limit = State()
     waiting_for_promo_code_text = State()
     waiting_for_promo_create_meta = State()
+    waiting_for_broadcast_promo_code = State()
+    waiting_for_broadcast_text = State()
+    waiting_for_broadcast_confirm = State()
 
 
 class UserStates(StatesGroup):
@@ -55,6 +68,8 @@ class UserStates(StatesGroup):
 
 
 PICS_DIR = Path(__file__).resolve().parent.parent / "pics"
+ADMIN_USERS_PAGE_SIZE = 20
+MAX_BROADCAST_TEXT_LENGTH = 4000
 STATUS_PICTURES: dict[SubscriptionState, Path] = {
     "new": PICS_DIR / "sub_new.png",
     "active": PICS_DIR / "sub_active.png",
@@ -152,9 +167,72 @@ async def _render_admin_screen(
         if len(text) <= 1024:
             await _safe_edit_caption(message, text, reply_markup=reply_markup)
         else:
+            try:
+                await message.delete()
+            except TelegramBadRequest:
+                pass
             await message.answer(text, reply_markup=reply_markup)
         return
     await _safe_edit_text(message, text, reply_markup=reply_markup)
+
+
+def _admin_users_title(*, active_only: bool) -> str:
+    return "Активные пользователи" if active_only else "Все пользователи"
+
+
+def _broadcast_audience_label(*, target: str, promo_code: str | None) -> str:
+    if target == "promo" and promo_code:
+        preview = promo_code[:10] + "..." if len(promo_code) > 10 else promo_code
+        return f"Промокод: <code>{escape(preview)}</code>"
+    return "Все пользователи"
+
+
+async def _render_admin_users_page(
+    message: Message,
+    access_service: AccessService,
+    *,
+    active_only: bool,
+    offset: int,
+) -> None:
+    total = await access_service.admin_count_users(active_only=active_only)
+    safe_offset = max(0, offset)
+    if total > 0 and safe_offset >= total:
+        safe_offset = max(total - ADMIN_USERS_PAGE_SIZE, 0)
+    rows = await access_service.admin_list_users(
+        active_only=active_only,
+        limit=ADMIN_USERS_PAGE_SIZE,
+        offset=safe_offset,
+    )
+    await _render_admin_screen(
+        message,
+        paginated_admin_users_list_text(
+            rows,
+            title=_admin_users_title(active_only=active_only),
+            total=total,
+            offset=safe_offset,
+            limit=ADMIN_USERS_PAGE_SIZE,
+        ),
+        reply_markup=admin_users_pagination_keyboard(
+            active_only=active_only,
+            offset=safe_offset,
+            limit=ADMIN_USERS_PAGE_SIZE,
+            total=total,
+        ),
+    )
+
+
+async def _send_broadcast_message(bot, telegram_user_id: int, text: str) -> bool:
+    for _ in range(3):
+        try:
+            await bot.send_message(telegram_user_id, text)
+            return True
+        except TelegramRetryAfter as exc:
+            await asyncio.sleep(exc.retry_after)
+        except (TelegramBadRequest, TelegramForbiddenError):
+            return False
+        except Exception:
+            return False
+    return False
 
 
 async def _render_user_screen(
@@ -214,6 +292,32 @@ def _qr_image(data: str) -> BufferedInputFile:
     buffer = BytesIO()
     img.save(buffer, format="PNG")
     return BufferedInputFile(buffer.getvalue(), filename="subscription.png")
+
+
+def _admin_user_text(access: AccessBundle) -> str:
+    if access.user is None:
+        return "Пользователь не найден."
+    return admin_user_card_text(
+        name=access.user.first_name or access.user.telegram_username or str(access.user.telegram_user_id),
+        telegram_user_id=access.user.telegram_user_id,
+        telegram_username=access.user.telegram_username,
+        is_active=access.is_active,
+        expires_at=access.expires_at,
+        has_vpn=access.vpn_account is not None,
+        device_limit=access.user.device_limit,
+        source=access.subscription.source if access.subscription else None,
+        remnawave_username=access.vpn_account.remnawave_username if access.vpn_account else None,
+    )
+
+
+def _split_lookup_value(raw_text: str) -> tuple[str, str] | None:
+    parts = raw_text.strip().split(maxsplit=1)
+    if len(parts) != 2:
+        return None
+    lookup, value = parts
+    if not lookup or not value:
+        return None
+    return lookup, value.strip()
 
 
 def create_router(access_service: AccessService, settings: Settings) -> Router:
@@ -465,11 +569,11 @@ def create_router(access_service: AccessService, settings: Settings) -> Router:
         if not _is_admin(callback, settings) or not callback.message:
             await callback.answer("Нет доступа", show_alert=True)
             return
-        rows = await access_service.admin_list_users(limit=50)
-        await _render_admin_screen(
+        await _render_admin_users_page(
             callback.message,
-            admin_users_list_text(rows, title="Все пользователи"),
-            reply_markup=admin_keyboard(),
+            access_service,
+            active_only=False,
+            offset=0,
         )
         await callback.answer()
 
@@ -478,11 +582,75 @@ def create_router(access_service: AccessService, settings: Settings) -> Router:
         if not _is_admin(callback, settings) or not callback.message:
             await callback.answer("Нет доступа", show_alert=True)
             return
-        rows = await access_service.admin_list_users(active_only=True, limit=50)
+        await _render_admin_users_page(
+            callback.message,
+            access_service,
+            active_only=True,
+            offset=0,
+        )
+        await callback.answer()
+
+    @router.callback_query(F.data.startswith("admin:list:"))
+    async def on_admin_users_page(callback: CallbackQuery) -> None:
+        if not _is_admin(callback, settings) or not callback.message:
+            await callback.answer("Нет доступа", show_alert=True)
+            return
+        _, _, mode, raw_offset = callback.data.split(":")
+        await _render_admin_users_page(
+            callback.message,
+            access_service,
+            active_only=mode == "active",
+            offset=int(raw_offset),
+        )
+        await callback.answer()
+
+    @router.callback_query(F.data == "admin:broadcast_menu")
+    async def on_admin_broadcast_menu(callback: CallbackQuery, state: FSMContext) -> None:
+        await state.clear()
+        if not _is_admin(callback, settings) or not callback.message:
+            await callback.answer("Нет доступа", show_alert=True)
+            return
         await _render_admin_screen(
             callback.message,
-            admin_users_list_text(rows, title="Активные пользователи"),
-            reply_markup=admin_keyboard(),
+            admin_broadcast_menu_text(),
+            reply_markup=admin_broadcast_menu_keyboard(),
+        )
+        await callback.answer()
+
+    @router.callback_query(F.data == "admin:broadcast:all")
+    async def on_admin_broadcast_all(callback: CallbackQuery, state: FSMContext) -> None:
+        if not _is_admin(callback, settings) or not callback.message:
+            await callback.answer("Нет доступа", show_alert=True)
+            return
+        recipients_count = await access_service.admin_count_users()
+        await state.clear()
+        await state.update_data(
+            broadcast_target="all",
+            broadcast_promo_code=None,
+            broadcast_recipients_count=recipients_count,
+        )
+        await state.set_state(AdminStates.waiting_for_broadcast_text)
+        await _render_admin_screen(
+            callback.message,
+            "Пришли текст рассылки одним сообщением.\n\n"
+            f"Сейчас в выборке: <b>{recipients_count}</b> пользователей.\n"
+            "Сообщение уйдёт как обычный текст без HTML-разметки.",
+            reply_markup=admin_cancel_keyboard("admin:broadcast_menu"),
+        )
+        await callback.answer()
+
+    @router.callback_query(F.data == "admin:broadcast:promo")
+    async def on_admin_broadcast_promo(callback: CallbackQuery, state: FSMContext) -> None:
+        if not _is_admin(callback, settings) or not callback.message:
+            await callback.answer("Нет доступа", show_alert=True)
+            return
+        await state.clear()
+        await state.set_state(AdminStates.waiting_for_broadcast_promo_code)
+        await _render_admin_screen(
+            callback.message,
+            "Пришли промокод целиком отдельным сообщением.\n"
+            "Я найду всех пользователей, которые его активировали.",
+            reply_markup=admin_cancel_keyboard("admin:broadcast_menu"),
         )
         await callback.answer()
 
@@ -518,31 +686,18 @@ def create_router(access_service: AccessService, settings: Settings) -> Router:
         )
         await callback.answer()
 
-    @router.callback_query(F.data == "admin:stats")
-    async def on_admin_stats(callback: CallbackQuery) -> None:
-        if not _is_admin(callback, settings) or not callback.message:
-            await callback.answer("Нет доступа", show_alert=True)
-            return
-        stats = await access_service.admin_get_stats()
-        await _render_admin_screen(
-            callback.message,
-            admin_stats_text(
-                stats.total_users,
-                stats.active_subscriptions,
-                stats.vpn_accounts,
-                stats.processed_webhooks,
-            ),
-            reply_markup=admin_keyboard(),
-        )
-        await callback.answer()
-
     @router.callback_query(F.data == "admin:find_prompt")
     async def on_admin_find_prompt(callback: CallbackQuery, state: FSMContext) -> None:
         if not _is_admin(callback, settings) or not callback.message:
             await callback.answer("Нет доступа", show_alert=True)
             return
+        await state.clear()
         await state.set_state(AdminStates.waiting_for_lookup)
-        await callback.message.answer("Пришли <code>telegram_user_id</code>, и я покажу карточку пользователя.")
+        await _render_admin_screen(
+            callback.message,
+            "Пришли <code>telegram_user_id</code> или <code>@username</code>, и я покажу карточку пользователя.",
+            reply_markup=admin_cancel_keyboard(),
+        )
         await callback.answer()
 
     @router.callback_query(F.data == "admin:import_prompt")
@@ -550,15 +705,58 @@ def create_router(access_service: AccessService, settings: Settings) -> Router:
         if not _is_admin(callback, settings) or not callback.message:
             await callback.answer("Нет доступа", show_alert=True)
             return
+        await state.clear()
         await state.set_state(AdminStates.waiting_for_manual_import)
-        await callback.message.answer(
+        await _render_admin_screen(
+            callback.message,
             "Пришли строку в формате:\n"
             "<code>telegram_user_id YYYY-MM-DD [device_limit] [комментарий]</code>\n"
             "или\n"
             "<code>telegram_user_id forever [device_limit] [комментарий]</code>\n\n"
             "Примеры:\n"
             "<code>123456789 2026-05-10 3 tribute_old_user</code>\n"
-            "<code>123456789 forever 9 vip_friend</code>"
+            "<code>123456789 forever 9 vip_friend</code>",
+            reply_markup=admin_cancel_keyboard(),
+        )
+        await callback.answer()
+
+    @router.callback_query(F.data == "admin:extend_prompt")
+    async def on_admin_extend_prompt(callback: CallbackQuery, state: FSMContext) -> None:
+        if not _is_admin(callback, settings) or not callback.message:
+            await callback.answer("Нет доступа", show_alert=True)
+            return
+        await state.clear()
+        await state.set_state(AdminStates.waiting_for_extend_access)
+        await _render_admin_screen(
+            callback.message,
+            "Пришли строку в формате:\n"
+            "<code>telegram_user_id дни</code>\n"
+            "или\n"
+            "<code>@username дни</code>\n\n"
+            "Примеры:\n"
+            "<code>123456789 30</code>\n"
+            "<code>@some_user 14</code>",
+            reply_markup=admin_cancel_keyboard(),
+        )
+        await callback.answer()
+
+    @router.callback_query(F.data == "admin:device_prompt")
+    async def on_admin_device_prompt(callback: CallbackQuery, state: FSMContext) -> None:
+        if not _is_admin(callback, settings) or not callback.message:
+            await callback.answer("Нет доступа", show_alert=True)
+            return
+        await state.clear()
+        await state.set_state(AdminStates.waiting_for_device_limit)
+        await _render_admin_screen(
+            callback.message,
+            "Пришли строку в формате:\n"
+            "<code>telegram_user_id лимит</code>\n"
+            "или\n"
+            "<code>@username лимит</code>\n\n"
+            "Примеры:\n"
+            "<code>123456789 5</code>\n"
+            "<code>@some_user 7</code>",
+            reply_markup=admin_cancel_keyboard(),
         )
         await callback.answer()
 
@@ -566,34 +764,211 @@ def create_router(access_service: AccessService, settings: Settings) -> Router:
     async def on_admin_lookup(message: Message, state: FSMContext) -> None:
         if not _is_admin(message, settings):
             return
-        try:
-            telegram_user_id = int((message.text or "").strip())
-        except ValueError:
-            await message.answer("Нужен числовой <code>telegram_user_id</code>.")
+        lookup = (message.text or "").strip()
+        if not lookup:
+            await message.answer("Нужен <code>telegram_user_id</code> или <code>@username</code>.")
             return
-        access = await access_service.admin_find_user(telegram_user_id)
+        access = await access_service.admin_find_user_by_lookup(lookup)
         if access.user is None:
             await message.answer("Пользователь не найден.")
             return
-        text = admin_user_card_text(
-            name=access.user.first_name or access.user.telegram_username or str(access.user.telegram_user_id),
-            telegram_user_id=access.user.telegram_user_id,
-            telegram_username=access.user.telegram_username,
-            is_active=access.is_active,
-            expires_at=access.expires_at,
-            has_vpn=access.vpn_account is not None,
-            device_limit=access.user.device_limit,
-            source=access.subscription.source if access.subscription else None,
-            remnawave_username=access.vpn_account.remnawave_username if access.vpn_account else None,
-        )
         await message.answer(
-            text,
+            _admin_user_text(access),
             reply_markup=admin_user_keyboard(
                 access.user.telegram_user_id,
                 has_access=access.vpn_account is not None,
             ),
         )
         await state.clear()
+
+    @router.message(AdminStates.waiting_for_extend_access)
+    async def on_admin_extend_access(message: Message, state: FSMContext) -> None:
+        if not _is_admin(message, settings):
+            return
+        parsed = _split_lookup_value(message.text or "")
+        if parsed is None:
+            await message.answer(
+                "Нужен формат: <code>telegram_user_id дни</code> или <code>@username дни</code>."
+            )
+            return
+        lookup, raw_days = parsed
+        try:
+            days = int(raw_days)
+        except ValueError:
+            await message.answer("Количество дней должно быть целым числом.")
+            return
+        if days <= 0:
+            await message.answer("Количество дней должно быть больше нуля.")
+            return
+        access = await access_service.admin_extend_access(lookup=lookup, days=days)
+        if access is None or access.user is None:
+            await message.answer("Пользователь не найден.")
+            return
+        await message.answer(
+            f"Подписка продлена на <b>{days}</b> дн.\n\n{_admin_user_text(access)}",
+            reply_markup=admin_user_keyboard(
+                access.user.telegram_user_id,
+                has_access=access.vpn_account is not None,
+            ),
+        )
+        await state.clear()
+
+    @router.message(AdminStates.waiting_for_device_limit)
+    async def on_admin_device_limit(message: Message, state: FSMContext) -> None:
+        if not _is_admin(message, settings):
+            return
+        parsed = _split_lookup_value(message.text or "")
+        if parsed is None:
+            await message.answer(
+                "Нужен формат: <code>telegram_user_id лимит</code> или <code>@username лимит</code>."
+            )
+            return
+        lookup, raw_limit = parsed
+        try:
+            device_limit = int(raw_limit)
+        except ValueError:
+            await message.answer("Лимит устройств должен быть целым числом.")
+            return
+        if device_limit <= 0:
+            await message.answer("Лимит устройств должен быть больше нуля.")
+            return
+        access = await access_service.admin_update_device_limit(
+            lookup=lookup,
+            device_limit=device_limit,
+        )
+        if access is None or access.user is None:
+            await message.answer("Пользователь не найден.")
+            return
+        await message.answer(
+            f"Лимит устройств обновлён до <b>{device_limit}</b>.\n\n{_admin_user_text(access)}",
+            reply_markup=admin_user_keyboard(
+                access.user.telegram_user_id,
+                has_access=access.vpn_account is not None,
+            ),
+        )
+        await state.clear()
+
+    @router.message(AdminStates.waiting_for_broadcast_promo_code)
+    async def on_admin_broadcast_promo_code(message: Message, state: FSMContext) -> None:
+        if not _is_admin(message, settings):
+            return
+        raw_code = message.text or ""
+        normalized_code = normalize_promo_code(raw_code)
+        if not normalized_code:
+            await message.answer("Промокод не должен быть пустым.")
+            return
+        recipients_count = await access_service.admin_count_promo_redemptions(code=normalized_code)
+        if recipients_count <= 0:
+            await message.answer(
+                "По этому промокоду пока нет активировавших пользователей.\n"
+                "Пришли другой код или нажми Отмена."
+            )
+            return
+        await state.update_data(
+            broadcast_target="promo",
+            broadcast_promo_code=normalized_code,
+            broadcast_recipients_count=recipients_count,
+        )
+        await state.set_state(AdminStates.waiting_for_broadcast_text)
+        await message.answer(
+            "Аудитория собрана.\n\n"
+            f"<b>Промокод:</b> <code>{escape(normalized_code[:10] + '...' if len(normalized_code) > 10 else normalized_code)}</code>\n"
+            f"<b>Получателей:</b> {recipients_count}\n\n"
+            "Теперь пришли текст рассылки одним сообщением.\n"
+            "Сообщение уйдёт как обычный текст без HTML-разметки.",
+            reply_markup=admin_cancel_keyboard("admin:broadcast_menu"),
+        )
+
+    @router.message(AdminStates.waiting_for_broadcast_text)
+    async def on_admin_broadcast_text(message: Message, state: FSMContext) -> None:
+        if not _is_admin(message, settings):
+            return
+        text = (message.text or "").strip()
+        if not text:
+            await message.answer("Текст рассылки не должен быть пустым.")
+            return
+        if len(text) > MAX_BROADCAST_TEXT_LENGTH:
+            await message.answer(
+                "Текст слишком длинный для Telegram.\n"
+                f"Максимум: {MAX_BROADCAST_TEXT_LENGTH} символов."
+            )
+            return
+        data = await state.get_data()
+        target = data.get("broadcast_target", "all")
+        promo_code = data.get("broadcast_promo_code")
+        recipients_count = int(data.get("broadcast_recipients_count", 0))
+        await state.update_data(broadcast_text=text)
+        await state.set_state(AdminStates.waiting_for_broadcast_confirm)
+        await message.answer(
+            admin_broadcast_confirm_text(
+                audience_label=_broadcast_audience_label(target=target, promo_code=promo_code),
+                recipients_count=recipients_count,
+                message_text=text,
+            ),
+            reply_markup=admin_broadcast_confirm_keyboard(),
+        )
+
+    @router.callback_query(F.data == "admin:broadcast:send")
+    async def on_admin_broadcast_send(callback: CallbackQuery, state: FSMContext) -> None:
+        if not _is_admin(callback, settings) or not callback.message:
+            await callback.answer("Нет доступа", show_alert=True)
+            return
+        data = await state.get_data()
+        text = data.get("broadcast_text")
+        if not text:
+            await callback.answer("Сначала пришли текст рассылки", show_alert=True)
+            return
+        target = data.get("broadcast_target", "all")
+        promo_code = data.get("broadcast_promo_code")
+        recipient_ids = await access_service.admin_list_broadcast_user_ids(
+            code=promo_code if target == "promo" else None
+        )
+        recipient_ids = list(dict.fromkeys(recipient_ids))
+        if not recipient_ids:
+            await state.clear()
+            await callback.answer("Получатели не найдены", show_alert=True)
+            await _render_admin_screen(
+                callback.message,
+                admin_broadcast_menu_text(),
+                reply_markup=admin_broadcast_menu_keyboard(),
+            )
+            return
+        await callback.answer("Рассылка запущена")
+        await _render_admin_screen(
+            callback.message,
+            "Рассылка выполняется.\n\nЭто может занять немного времени.",
+        )
+        delivered = 0
+        failed = 0
+        for telegram_user_id in recipient_ids:
+            if await _send_broadcast_message(callback.bot, telegram_user_id, text):
+                delivered += 1
+            else:
+                failed += 1
+        audience_label = _broadcast_audience_label(target=target, promo_code=promo_code)
+        await _render_admin_screen(
+            callback.message,
+            "<b>Рассылка завершена</b>\n\n"
+            f"<b>Аудитория:</b> {audience_label}\n"
+            f"<b>Всего в выборке:</b> {len(recipient_ids)}\n"
+            f"<b>Доставлено:</b> {delivered}\n"
+            f"<b>Не доставлено:</b> {failed}",
+            reply_markup=admin_broadcast_menu_keyboard(),
+        )
+        await state.clear()
+
+    @router.callback_query(F.data == "admin:broadcast:cancel")
+    async def on_admin_broadcast_cancel(callback: CallbackQuery, state: FSMContext) -> None:
+        await state.clear()
+        if not _is_admin(callback, settings) or not callback.message:
+            await callback.answer("Нет доступа", show_alert=True)
+            return
+        await _render_admin_screen(
+            callback.message,
+            admin_broadcast_menu_text(),
+            reply_markup=admin_broadcast_menu_keyboard(),
+        )
+        await callback.answer("Рассылка отменена")
 
     @router.message(UserStates.waiting_for_promo_code)
     async def on_user_promo_code(message: Message, state: FSMContext) -> None:
@@ -678,9 +1053,11 @@ def create_router(access_service: AccessService, settings: Settings) -> Router:
             return
         await state.clear()
         await state.set_state(AdminStates.waiting_for_promo_code_text)
-        await callback.message.answer(
+        await _render_admin_screen(
+            callback.message,
             "Сначала пришли сам промокод целиком отдельным сообщением.\n"
-            "Он может быть длинным и многострочным."
+            "Он может быть длинным и многострочным.",
+            reply_markup=admin_cancel_keyboard(),
         )
         await callback.answer()
 
@@ -758,17 +1135,7 @@ def create_router(access_service: AccessService, settings: Settings) -> Router:
             return
         await _render_admin_screen(
             callback.message,
-            admin_user_card_text(
-                name=access.user.first_name or access.user.telegram_username or str(access.user.telegram_user_id),
-                telegram_user_id=access.user.telegram_user_id,
-                telegram_username=access.user.telegram_username,
-                is_active=access.is_active,
-                expires_at=access.expires_at,
-                has_vpn=access.vpn_account is not None,
-                device_limit=access.user.device_limit,
-                source=access.subscription.source if access.subscription else None,
-                remnawave_username=access.vpn_account.remnawave_username if access.vpn_account else None,
-            ),
+            _admin_user_text(access),
             reply_markup=admin_user_keyboard(telegram_user_id, has_access=access.vpn_account is not None),
         )
         await callback.answer()
@@ -794,17 +1161,7 @@ def create_router(access_service: AccessService, settings: Settings) -> Router:
         refreshed = await access_service.admin_find_user(telegram_user_id)
         await _render_admin_screen(
             callback.message,
-            admin_user_card_text(
-                name=refreshed.user.first_name or refreshed.user.telegram_username or str(refreshed.user.telegram_user_id),
-                telegram_user_id=refreshed.user.telegram_user_id,
-                telegram_username=refreshed.user.telegram_username,
-                is_active=refreshed.is_active,
-                expires_at=refreshed.expires_at,
-                has_vpn=refreshed.vpn_account is not None,
-                device_limit=refreshed.user.device_limit,
-                source=refreshed.subscription.source if refreshed.subscription else None,
-                remnawave_username=refreshed.vpn_account.remnawave_username if refreshed.vpn_account else None,
-            ),
+            _admin_user_text(refreshed),
             reply_markup=admin_user_keyboard(
                 telegram_user_id,
                 has_access=refreshed.vpn_account is not None,

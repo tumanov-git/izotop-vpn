@@ -30,6 +30,10 @@ def ensure_utc(value: datetime | None) -> datetime | None:
     return value.astimezone(UTC)
 
 
+def normalize_telegram_username(value: str) -> str:
+    return value.strip().lstrip("@").casefold()
+
+
 @dataclass(slots=True)
 class DashboardStats:
     total_users: int
@@ -58,6 +62,17 @@ class WebhookEventRow:
 
 
 class UserRepository:
+    async def count_users(
+        self,
+        session: AsyncSession,
+        *,
+        active_only: bool = False,
+    ) -> int:
+        if not active_only:
+            return await session.scalar(select(func.count()).select_from(User)) or 0
+        subscriptions = (await session.execute(select(Subscription))).scalars().all()
+        return sum(1 for item in subscriptions if subscription_is_active(item))
+
     async def upsert_user(
         self,
         session: AsyncSession,
@@ -105,6 +120,17 @@ class UserRepository:
         query = select(User).where(User.telegram_user_id == telegram_user_id)
         return (await session.execute(query)).scalar_one_or_none()
 
+    async def search_by_telegram_username(
+        self,
+        session: AsyncSession,
+        telegram_username: str,
+    ) -> User | None:
+        normalized = normalize_telegram_username(telegram_username)
+        if not normalized:
+            return None
+        query = select(User).where(func.lower(User.telegram_username) == normalized)
+        return (await session.execute(query)).scalar_one_or_none()
+
     async def get_stats(self, session: AsyncSession) -> DashboardStats:
         total_users = await session.scalar(select(func.count()).select_from(User)) or 0
         subscriptions = (await session.execute(select(Subscription))).scalars().all()
@@ -124,8 +150,9 @@ class UserRepository:
         *,
         active_only: bool = False,
         limit: int = 25,
+        offset: int = 0,
     ) -> list[AdminUserRow]:
-        query = select(User).order_by(User.created_at.desc()).limit(limit)
+        query = select(User).order_by(User.created_at.desc()).offset(offset).limit(limit)
         users = (await session.execute(query)).scalars().all()
         rows: list[AdminUserRow] = []
         for user in users:
@@ -151,6 +178,10 @@ class UserRepository:
                 )
             )
         return rows
+
+    async def list_telegram_user_ids(self, session: AsyncSession) -> list[int]:
+        query = select(User.telegram_user_id).order_by(User.created_at.asc(), User.telegram_user_id.asc())
+        return list((await session.execute(query)).scalars().all())
 
 
 class SubscriptionRepository:
@@ -337,6 +368,20 @@ class PromoCodeRepository:
 
 
 class PromoCodeRedemptionRepository:
+    async def count_by_code(
+        self,
+        session: AsyncSession,
+        *,
+        code: str,
+    ) -> int:
+        query = (
+            select(func.count())
+            .select_from(PromoCodeRedemption)
+            .join(PromoCode, PromoCode.id == PromoCodeRedemption.promo_code_id)
+            .where(PromoCode.code == code)
+        )
+        return await session.scalar(query) or 0
+
     async def has_user_redeemed(
         self,
         session: AsyncSession,
@@ -365,6 +410,20 @@ class PromoCodeRedemptionRepository:
         )
         session.add(redemption)
         return redemption
+
+    async def list_telegram_user_ids_by_code(
+        self,
+        session: AsyncSession,
+        *,
+        code: str,
+    ) -> list[int]:
+        query = (
+            select(PromoCodeRedemption.telegram_user_id)
+            .join(PromoCode, PromoCode.id == PromoCodeRedemption.promo_code_id)
+            .where(PromoCode.code == code)
+            .order_by(PromoCodeRedemption.redeemed_at.asc(), PromoCodeRedemption.telegram_user_id.asc())
+        )
+        return list((await session.execute(query)).scalars().all())
 
 
 def subscription_is_active(subscription: Subscription | None) -> bool:

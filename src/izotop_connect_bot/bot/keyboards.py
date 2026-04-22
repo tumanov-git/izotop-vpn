@@ -129,8 +129,10 @@ def admin_keyboard() -> InlineKeyboardMarkup:
         inline_keyboard=[
             [InlineKeyboardButton(text="Все пользователи", callback_data="admin:users", style=ButtonStyle.PRIMARY)],
             [InlineKeyboardButton(text="Активные", callback_data="admin:active")],
+            [InlineKeyboardButton(text="Рассылка", callback_data="admin:broadcast_menu")],
             [InlineKeyboardButton(text="Webhook events", callback_data="admin:webhooks")],
-            [InlineKeyboardButton(text="Статистика", callback_data="admin:stats")],
+            [InlineKeyboardButton(text="Продлить доступ", callback_data="admin:extend_prompt")],
+            [InlineKeyboardButton(text="Поднять число девайсов", callback_data="admin:device_prompt")],
             [InlineKeyboardButton(text="Найти пользователя", callback_data="admin:find_prompt")],
             [InlineKeyboardButton(text="Импортировать вручную", callback_data="admin:import_prompt")],
             [InlineKeyboardButton(text="Создать промокод", callback_data="admin:promo_prompt")],
@@ -188,5 +190,105 @@ def admin_delete_confirm_keyboard(telegram_user_id: int) -> InlineKeyboardMarkup
                 )
             ],
             [InlineKeyboardButton(text="Назад", callback_data=f"admin:view:{telegram_user_id}")],
+        ]
+    )
+
+
+def admin_users_pagination_keyboard(
+    *,
+    active_only: bool,
+    offset: int,
+    limit: int,
+    total: int,
+) -> InlineKeyboardMarkup:
+    mode = "active" if active_only else "all"
+    all_button = (
+        InlineKeyboardButton(text="Все", callback_data="admin:list:all:0")
+        if active_only
+        else InlineKeyboardButton(
+            text="Все пользователи",
+            callback_data="admin:list:all:0",
+            style=ButtonStyle.PRIMARY,
+        )
+    )
+    active_button = (
+        InlineKeyboardButton(
+            text="Активные",
+            callback_data="admin:list:active:0",
+            style=ButtonStyle.PRIMARY,
+        )
+        if active_only
+        else InlineKeyboardButton(text="Активные", callback_data="admin:list:active:0")
+    )
+    rows: list[list[InlineKeyboardButton]] = [
+        [all_button, active_button]
+    ]
+    nav_row: list[InlineKeyboardButton] = []
+    if offset > 0:
+        nav_row.append(
+            InlineKeyboardButton(
+                text="Назад",
+                callback_data=f"admin:list:{mode}:{max(offset - limit, 0)}",
+            )
+        )
+    if offset + limit < total:
+        nav_row.append(
+            InlineKeyboardButton(
+                text="Дальше",
+                callback_data=f"admin:list:{mode}:{offset + limit}",
+            )
+        )
+    if nav_row:
+        rows.append(nav_row)
+    rows.append([InlineKeyboardButton(text="Назад в админку", callback_data="admin:menu")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def admin_broadcast_menu_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text="Всем пользователям",
+                    callback_data="admin:broadcast:all",
+                    style=ButtonStyle.PRIMARY,
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    text="По промокоду",
+                    callback_data="admin:broadcast:promo",
+                )
+            ],
+            [InlineKeyboardButton(text="Назад в админку", callback_data="admin:menu")],
+        ]
+    )
+
+
+def admin_broadcast_confirm_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text="Отправить",
+                    callback_data="admin:broadcast:send",
+                    style=ButtonStyle.SUCCESS,
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    text="Отменить",
+                    callback_data="admin:broadcast:cancel",
+                )
+            ],
+            [InlineKeyboardButton(text="Назад к рассылке", callback_data="admin:broadcast_menu")],
+        ]
+    )
+
+
+def admin_cancel_keyboard(callback_data: str = "admin:menu") -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="Отмена", callback_data=callback_data)],
         ]
     )
