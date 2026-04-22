@@ -30,6 +30,8 @@ from izotop_connect_bot.bot.keyboards import (
     home_keyboard,
     keys_keyboard,
     promo_entry_keyboard,
+    white_checkout_keyboard,
+    white_internet_keyboard,
 )
 from izotop_connect_bot.bot.texts import (
     DEVICE_GUIDES,
@@ -41,10 +43,13 @@ from izotop_connect_bot.bot.texts import (
     admin_stats_text,
     admin_webhooks_text,
     faq_text,
+    format_white_traffic_gb,
     inactive_access_text,
     keys_text,
     paginated_admin_users_list_text,
     welcome_text,
+    white_checkout_text,
+    white_internet_text,
 )
 from izotop_connect_bot.config import Settings
 from izotop_connect_bot.links import build_happ_link
@@ -75,6 +80,7 @@ STATUS_PICTURES: dict[SubscriptionState, Path] = {
     "active": PICS_DIR / "sub_active.png",
     "inactive": PICS_DIR / "sub_inactive.png",
 }
+WHITE_TOPUP_PACKAGES = {50, 100, 250}
 
 
 def _display_name(message: Message) -> str:
@@ -100,6 +106,69 @@ def _picture_file(state: SubscriptionState) -> FSInputFile:
 
 def _access_url(settings: Settings, subscription_url: str) -> str:
     return build_happ_link(settings.app_base_url, subscription_url)
+
+
+def _show_white_internet_button(access: AccessBundle, white_access: object | None) -> bool:
+    return bool(access.is_active and white_access is not None and getattr(white_access, "is_enabled", False))
+
+
+async def _render_home_dashboard(
+    message: Message,
+    access_service: AccessService,
+    settings: Settings,
+    access: AccessBundle,
+    *,
+    name: str,
+    is_admin: bool,
+    refresh_media: bool,
+) -> None:
+    white_access = await access_service.get_white_access_state(access.user.telegram_user_id) if access.user else None
+    white_traffic_remaining = None
+    if white_access is not None and access.is_active:
+        white_traffic_remaining = format_white_traffic_gb(
+            getattr(white_access, "current_free_remaining_bytes", 0)
+            + getattr(white_access, "purchased_remaining_bytes", 0),
+            is_unlimited=getattr(white_access, "is_unlimited", False),
+        )
+    await _render_user_screen(
+        message,
+        access,
+        welcome_text(
+            name,
+            state=_subscription_state(access),
+            expires_at=access.expires_at,
+            device_limit=access.user.device_limit if access.user and access.is_active else None,
+            white_traffic_remaining=white_traffic_remaining,
+        ),
+        reply_markup=home_keyboard(
+            state=_subscription_state(access),
+            is_admin=is_admin,
+            buy_url=settings.bot_buy_url,
+            support_url=settings.bot_support_url,
+            show_white_internet=_show_white_internet_button(access, white_access),
+        ),
+        refresh_media=refresh_media,
+    )
+
+
+async def _render_white_internet_screen(
+    message: Message,
+    access_service: AccessService,
+    access: AccessBundle,
+    telegram_user_id: int,
+) -> None:
+    white_access = await access_service.get_white_access_state(telegram_user_id)
+    white_traffic_remaining = format_white_traffic_gb(
+        getattr(white_access, "current_free_remaining_bytes", 0)
+        + getattr(white_access, "purchased_remaining_bytes", 0),
+        is_unlimited=getattr(white_access, "is_unlimited", False),
+    )
+    await _render_user_screen(
+        message,
+        access,
+        white_internet_text(white_traffic_remaining=white_traffic_remaining),
+        reply_markup=white_internet_keyboard(),
+    )
 
 
 async def _safe_edit_text(
@@ -267,22 +336,19 @@ async def _render_user_screen(
     )
 
 
-async def _send_dashboard(message: Message, access: AccessBundle, settings: Settings) -> None:
-    name = _display_name(message)
-    await _render_user_screen(
+async def _send_dashboard(
+    message: Message,
+    access: AccessBundle,
+    settings: Settings,
+    access_service: AccessService,
+) -> None:
+    await _render_home_dashboard(
         message,
+        access_service,
+        settings,
         access,
-        welcome_text(
-            name,
-            state=_subscription_state(access),
-            expires_at=access.expires_at,
-        ),
-        reply_markup=home_keyboard(
-            state=_subscription_state(access),
-            is_admin=_is_admin(message, settings),
-            buy_url=settings.bot_buy_url,
-            support_url=settings.bot_support_url,
-        ),
+        name=_display_name(message),
+        is_admin=_is_admin(message, settings),
         refresh_media=True,
     )
 
@@ -330,7 +396,7 @@ def create_router(access_service: AccessService, settings: Settings) -> Router:
             return
         await access_service.register_telegram_user(message.from_user)
         access = await access_service.get_access_bundle(message.from_user.id)
-        await _send_dashboard(message, access, settings)
+        await _send_dashboard(message, access, settings, access_service)
 
     @router.callback_query(F.data == "home:root")
     async def on_home_root(callback: CallbackQuery, state: FSMContext) -> None:
@@ -338,20 +404,13 @@ def create_router(access_service: AccessService, settings: Settings) -> Router:
         if not callback.from_user or not callback.message:
             return
         access = await access_service.get_access_bundle(callback.from_user.id)
-        await _render_user_screen(
+        await _render_home_dashboard(
             callback.message,
+            access_service,
+            settings,
             access,
-            welcome_text(
-                callback.from_user.first_name or "друг",
-                state=_subscription_state(access),
-                expires_at=access.expires_at,
-            ),
-            reply_markup=home_keyboard(
-                state=_subscription_state(access),
-                is_admin=_is_admin(callback, settings),
-                buy_url=settings.bot_buy_url,
-                support_url=settings.bot_support_url,
-            ),
+            name=callback.from_user.first_name or "друг",
+            is_admin=_is_admin(callback, settings),
             refresh_media=True,
         )
         await callback.answer()
@@ -361,20 +420,13 @@ def create_router(access_service: AccessService, settings: Settings) -> Router:
         if not callback.from_user or not callback.message:
             return
         access = await access_service.refresh_remote_state(callback.from_user.id)
-        await _render_user_screen(
+        await _render_home_dashboard(
             callback.message,
+            access_service,
+            settings,
             access,
-            welcome_text(
-                callback.from_user.first_name or "друг",
-                state=_subscription_state(access),
-                expires_at=access.expires_at,
-            ),
-            reply_markup=home_keyboard(
-                state=_subscription_state(access),
-                is_admin=_is_admin(callback, settings),
-                buy_url=settings.bot_buy_url,
-                support_url=settings.bot_support_url,
-            ),
+            name=callback.from_user.first_name or "друг",
+            is_admin=_is_admin(callback, settings),
             refresh_media=True,
         )
         await callback.answer("Статус обновлён")
@@ -433,6 +485,73 @@ def create_router(access_service: AccessService, settings: Settings) -> Router:
             access,
             "Выбери устройство, для которого показать краткий гайд.",
             reply_markup=device_keyboard(prefix="guide"),
+        )
+        await callback.answer()
+
+    @router.callback_query(F.data == "home:white")
+    async def on_white_internet(callback: CallbackQuery) -> None:
+        if not callback.from_user or not callback.message:
+            return
+        access = await access_service.get_access_bundle(callback.from_user.id)
+        if not access.is_active:
+            await callback.answer("Белый интернет доступен только при активной подписке", show_alert=True)
+            return
+        white_access = await access_service.get_white_access_state(callback.from_user.id)
+        if not getattr(white_access, "is_enabled", False):
+            await callback.answer("Белый интернет пока не настроен", show_alert=True)
+            return
+        await _render_white_internet_screen(
+            callback.message,
+            access_service,
+            access,
+            callback.from_user.id,
+        )
+        await callback.answer()
+
+    @router.callback_query(F.data.startswith("white:buy:"))
+    async def on_white_buy(callback: CallbackQuery) -> None:
+        if not callback.from_user or not callback.message:
+            return
+        access = await access_service.get_access_bundle(callback.from_user.id)
+        if not access.is_active:
+            await callback.answer("Нужна активная подписка", show_alert=True)
+            return
+        _, _, raw_gigabytes = callback.data.split(":")
+        gigabytes = int(raw_gigabytes)
+        if gigabytes not in WHITE_TOPUP_PACKAGES:
+            await callback.answer("Такой пакет пока недоступен", show_alert=True)
+            return
+        try:
+            checkout = await access_service.create_white_topup_checkout(
+                telegram_user_id=callback.from_user.id,
+                gigabytes=gigabytes,
+            )
+        except PermissionError as exc:
+            await callback.answer(str(exc), show_alert=True)
+            return
+        except Exception:
+            await callback.answer("Не получилось создать оплату, попробуй ещё раз", show_alert=True)
+            return
+
+        white_access = await access_service.get_white_access_state(callback.from_user.id)
+        white_traffic_remaining = format_white_traffic_gb(
+            getattr(white_access, "current_free_remaining_bytes", 0)
+            + getattr(white_access, "purchased_remaining_bytes", 0),
+            is_unlimited=getattr(white_access, "is_unlimited", False),
+        )
+        payment_url = checkout.webapp_payment_url or checkout.payment_url
+        if not payment_url:
+            await callback.answer("Tribute не вернул ссылку на оплату", show_alert=True)
+            return
+        await _render_user_screen(
+            callback.message,
+            access,
+            white_checkout_text(
+                white_traffic_remaining=white_traffic_remaining,
+                gigabytes=checkout.gigabytes,
+                amount_rub=checkout.amount_rub,
+            ),
+            reply_markup=white_checkout_keyboard(payment_url),
         )
         await callback.answer()
 
@@ -666,6 +785,35 @@ def create_router(access_service: AccessService, settings: Settings) -> Router:
             reply_markup=admin_keyboard(),
         )
         await callback.answer()
+
+    @router.callback_query(F.data == "admin:white_sync_all")
+    async def on_admin_white_sync_all(callback: CallbackQuery) -> None:
+        if not _is_admin(callback, settings) or not callback.message:
+            await callback.answer("Нет доступа", show_alert=True)
+            return
+        await callback.answer("Запускаю white-sync для активных пользователей")
+        await _render_admin_screen(
+            callback.message,
+            "Запускаю white-sync для всех активных подписок. Это может занять немного времени.",
+            reply_markup=admin_keyboard(),
+        )
+        try:
+            total, synced, failed = await access_service.admin_sync_white_for_active_users()
+        except PermissionError as exc:
+            await _render_admin_screen(
+                callback.message,
+                f"White-sync не запущен.\n\n{escape(str(exc))}",
+                reply_markup=admin_keyboard(),
+            )
+            return
+        await _render_admin_screen(
+            callback.message,
+            "White-sync завершён.\n\n"
+            f"Активных пользователей: <b>{total}</b>\n"
+            f"Успешно синхронизировано: <b>{synced}</b>\n"
+            f"С ошибкой: <b>{failed}</b>",
+            reply_markup=admin_keyboard(),
+        )
 
     @router.callback_query(F.data == "admin:menu")
     async def on_admin_menu(callback: CallbackQuery, state: FSMContext) -> None:
@@ -989,7 +1137,7 @@ def create_router(access_service: AccessService, settings: Settings) -> Router:
             await message.answer("Промокод неверный.")
             return
         await state.clear()
-        await _send_dashboard(message, access, settings)
+        await _send_dashboard(message, access, settings, access_service)
 
     @router.message(AdminStates.waiting_for_manual_import)
     async def on_admin_manual_import(message: Message, state: FSMContext) -> None:

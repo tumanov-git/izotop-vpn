@@ -15,6 +15,9 @@ from izotop_connect_bot.models import (
     User,
     VpnAccount,
     WebhookEvent,
+    WhiteTopUpOrder,
+    WhiteTrafficCycle,
+    WhiteVpnAccount,
 )
 
 
@@ -183,6 +186,15 @@ class UserRepository:
         query = select(User.telegram_user_id).order_by(User.created_at.asc(), User.telegram_user_id.asc())
         return list((await session.execute(query)).scalars().all())
 
+    async def list_active_telegram_user_ids(self, session: AsyncSession) -> list[int]:
+        query = (
+            select(User.telegram_user_id)
+            .join(Subscription, Subscription.telegram_user_id == User.telegram_user_id)
+            .where(Subscription.expires_at.is_not(None), Subscription.expires_at > utcnow())
+            .order_by(User.created_at.asc(), User.telegram_user_id.asc())
+        )
+        return list((await session.execute(query)).scalars().all())
+
 
 class SubscriptionRepository:
     async def upsert_subscription(
@@ -273,6 +285,195 @@ class VpnAccountRepository:
             account.subscription_url = subscription_url
             account.last_issued_at = utcnow()
         return account
+
+
+class WhiteVpnAccountRepository:
+    async def get_account(self, session: AsyncSession, telegram_user_id: int) -> WhiteVpnAccount | None:
+        query = select(WhiteVpnAccount).where(WhiteVpnAccount.telegram_user_id == telegram_user_id)
+        return (await session.execute(query)).scalar_one_or_none()
+
+    async def delete_account(self, session: AsyncSession, telegram_user_id: int) -> bool:
+        account = await self.get_account(session, telegram_user_id)
+        if account is None:
+            return False
+        await session.delete(account)
+        return True
+
+    async def upsert_account(
+        self,
+        session: AsyncSession,
+        *,
+        telegram_user_id: int,
+        remnawave_user_uuid: str,
+        remnawave_username: str,
+        subscription_url: str,
+    ) -> WhiteVpnAccount:
+        account = await self.get_account(session, telegram_user_id)
+        if account is None:
+            account = WhiteVpnAccount(
+                telegram_user_id=telegram_user_id,
+                remnawave_user_uuid=remnawave_user_uuid,
+                remnawave_username=remnawave_username,
+                subscription_url=subscription_url,
+                last_issued_at=utcnow(),
+            )
+            session.add(account)
+        else:
+            account.remnawave_user_uuid = remnawave_user_uuid
+            account.remnawave_username = remnawave_username
+            account.subscription_url = subscription_url
+            account.last_issued_at = utcnow()
+        return account
+
+
+class WhiteTrafficCycleRepository:
+    async def get_latest_cycle(
+        self,
+        session: AsyncSession,
+        telegram_user_id: int,
+    ) -> WhiteTrafficCycle | None:
+        query = (
+            select(WhiteTrafficCycle)
+            .where(WhiteTrafficCycle.telegram_user_id == telegram_user_id)
+            .order_by(WhiteTrafficCycle.expires_at.desc(), WhiteTrafficCycle.id.desc())
+            .limit(1)
+        )
+        return (await session.execute(query)).scalar_one_or_none()
+
+    async def get_active_cycle(
+        self,
+        session: AsyncSession,
+        telegram_user_id: int,
+        *,
+        at: datetime | None = None,
+    ) -> WhiteTrafficCycle | None:
+        point = ensure_utc(at) or utcnow()
+        query = (
+            select(WhiteTrafficCycle)
+            .where(
+                WhiteTrafficCycle.telegram_user_id == telegram_user_id,
+                WhiteTrafficCycle.started_at <= point,
+                WhiteTrafficCycle.expires_at > point,
+            )
+            .order_by(WhiteTrafficCycle.started_at.desc(), WhiteTrafficCycle.id.desc())
+            .limit(1)
+        )
+        return (await session.execute(query)).scalar_one_or_none()
+
+    async def list_cycles(
+        self,
+        session: AsyncSession,
+        telegram_user_id: int,
+    ) -> list[WhiteTrafficCycle]:
+        query = (
+            select(WhiteTrafficCycle)
+            .where(WhiteTrafficCycle.telegram_user_id == telegram_user_id)
+            .order_by(WhiteTrafficCycle.started_at.asc(), WhiteTrafficCycle.id.asc())
+        )
+        return list((await session.execute(query)).scalars().all())
+
+    async def create_cycle(
+        self,
+        session: AsyncSession,
+        *,
+        telegram_user_id: int,
+        started_at: datetime,
+        expires_at: datetime,
+        free_bytes: int,
+        start_used_bytes: int | None,
+    ) -> WhiteTrafficCycle:
+        cycle = WhiteTrafficCycle(
+            telegram_user_id=telegram_user_id,
+            started_at=ensure_utc(started_at),
+            expires_at=ensure_utc(expires_at),
+            free_bytes=free_bytes,
+            start_used_bytes=start_used_bytes,
+            end_used_bytes=None,
+        )
+        session.add(cycle)
+        return cycle
+
+    async def delete_for_user(self, session: AsyncSession, telegram_user_id: int) -> int:
+        query = select(WhiteTrafficCycle).where(WhiteTrafficCycle.telegram_user_id == telegram_user_id)
+        rows = (await session.execute(query)).scalars().all()
+        for row in rows:
+            await session.delete(row)
+        return len(rows)
+
+
+class WhiteTopUpOrderRepository:
+    PAID_STATUSES = {"paid", "shop_order", "shop_order_charge_success"}
+
+    async def get_by_order_uuid(
+        self,
+        session: AsyncSession,
+        order_uuid: str,
+    ) -> WhiteTopUpOrder | None:
+        query = select(WhiteTopUpOrder).where(WhiteTopUpOrder.order_uuid == order_uuid)
+        return (await session.execute(query)).scalar_one_or_none()
+
+    async def create(
+        self,
+        session: AsyncSession,
+        *,
+        telegram_user_id: int,
+        order_uuid: str,
+        granted_bytes: int,
+        amount_minor: int,
+        currency: str,
+        title: str,
+        status: str,
+        payment_url: str | None,
+        webapp_payment_url: str | None,
+        payload_json: str | None,
+    ) -> WhiteTopUpOrder:
+        order = WhiteTopUpOrder(
+            telegram_user_id=telegram_user_id,
+            order_uuid=order_uuid,
+            granted_bytes=granted_bytes,
+            amount_minor=amount_minor,
+            currency=currency,
+            title=title,
+            status=status,
+            payment_url=payment_url,
+            webapp_payment_url=webapp_payment_url,
+            payload_json=payload_json,
+        )
+        session.add(order)
+        return order
+
+    async def list_for_user(
+        self,
+        session: AsyncSession,
+        telegram_user_id: int,
+    ) -> list[WhiteTopUpOrder]:
+        query = (
+            select(WhiteTopUpOrder)
+            .where(WhiteTopUpOrder.telegram_user_id == telegram_user_id)
+            .order_by(WhiteTopUpOrder.created_at.asc(), WhiteTopUpOrder.id.asc())
+        )
+        return list((await session.execute(query)).scalars().all())
+
+    async def sum_paid_bytes(
+        self,
+        session: AsyncSession,
+        telegram_user_id: int,
+    ) -> int:
+        query = (
+            select(func.coalesce(func.sum(WhiteTopUpOrder.granted_bytes), 0))
+            .where(
+                WhiteTopUpOrder.telegram_user_id == telegram_user_id,
+                func.lower(WhiteTopUpOrder.status).in_(self.PAID_STATUSES),
+            )
+        )
+        return int(await session.scalar(query) or 0)
+
+    async def delete_for_user(self, session: AsyncSession, telegram_user_id: int) -> int:
+        query = select(WhiteTopUpOrder).where(WhiteTopUpOrder.telegram_user_id == telegram_user_id)
+        rows = (await session.execute(query)).scalars().all()
+        for row in rows:
+            await session.delete(row)
+        return len(rows)
 
 
 class WebhookEventRepository:

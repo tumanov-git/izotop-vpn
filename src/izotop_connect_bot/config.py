@@ -22,6 +22,10 @@ class Settings(BaseSettings):
 
     tribute_webhook_secret: str = Field(alias="TRIBUTE_WEBHOOK_SECRET")
     tribute_signature_header: str = Field(default="trbt-signature", alias="TRIBUTE_SIGNATURE_HEADER")
+    tribute_api_key: str | None = Field(default=None, alias="TRIBUTE_API_KEY")
+    tribute_shop_base_url: str = Field(default="https://tribute.tg/api/v1", alias="TRIBUTE_SHOP_BASE_URL")
+    tribute_shop_success_url: str | None = Field(default=None, alias="TRIBUTE_SHOP_SUCCESS_URL")
+    tribute_shop_fail_url: str | None = Field(default=None, alias="TRIBUTE_SHOP_FAIL_URL")
 
     remnawave_base_url: str = Field(alias="REMNAWAVE_BASE_URL")
     remnawave_token: str = Field(alias="REMNAWAVE_TOKEN")
@@ -32,8 +36,21 @@ class Settings(BaseSettings):
         default=None, alias="REMNAWAVE_EXTERNAL_SQUAD_UUID"
     )
     remnawave_user_prefix: str = Field(default="tg", alias="REMNAWAVE_USER_PREFIX")
+    remnawave_white_internal_squad_uuid: str | None = Field(
+        default=None, alias="REMNAWAVE_WHITE_INTERNAL_SQUAD_UUID"
+    )
+    remnawave_white_external_squad_uuid: str | None = Field(
+        default=None, alias="REMNAWAVE_WHITE_EXTERNAL_SQUAD_UUID"
+    )
+    remnawave_white_user_prefix: str = Field(default="tgw", alias="REMNAWAVE_WHITE_USER_PREFIX")
     remnawave_default_device_limit: int = Field(default=3, alias="REMNAWAVE_DEFAULT_DEVICE_LIMIT")
     remnawave_ssl_ignore: bool = Field(default=False, alias="REMNAWAVE_SSL_IGNORE")
+    white_monthly_free_gb: int = Field(default=5, alias="WHITE_MONTHLY_FREE_GB")
+    white_unlimited_user_ids: tuple[int, ...] = Field(default_factory=tuple, alias="WHITE_UNLIMITED_USER_IDS")
+    white_price_per_gb_rub: int = Field(default=2, alias="WHITE_PRICE_PER_GB_RUB")
+    white_price_50gb_rub: int = Field(default=110, alias="WHITE_PRICE_50GB_RUB")
+    white_price_100gb_rub: int = Field(default=220, alias="WHITE_PRICE_100GB_RUB")
+    white_price_250gb_rub: int = Field(default=550, alias="WHITE_PRICE_250GB_RUB")
 
     database_url: str = Field(
         default="sqlite+aiosqlite:///./data/izotop_connect.db", alias="DATABASE_URL"
@@ -47,6 +64,19 @@ class Settings(BaseSettings):
         if isinstance(value, (list, tuple)):
             return tuple(int(item) for item in value)
         return tuple(int(item.strip()) for item in str(value).split(",") if item.strip())
+
+    @field_validator("white_unlimited_user_ids", mode="before")
+    @classmethod
+    def parse_white_unlimited_user_ids(cls, value: object) -> tuple[int, ...]:
+        if value in (None, "", ()):
+            return tuple()
+        if isinstance(value, (list, tuple)):
+            return tuple(int(item) for item in value)
+        return tuple(int(item.strip()) for item in str(value).split(",") if item.strip())
+
+    @property
+    def tribute_effective_api_key(self) -> str:
+        return self.tribute_api_key or self.tribute_webhook_secret
 
     @property
     def webhook_path(self) -> str:

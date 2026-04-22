@@ -28,6 +28,10 @@ class AppState:
         self.tribute = TributeService(
             secret=settings.tribute_webhook_secret,
             signature_header=settings.tribute_signature_header,
+            api_key=settings.tribute_api_key,
+            shop_base_url=settings.tribute_shop_base_url,
+            success_url=settings.tribute_shop_success_url,
+            fail_url=settings.tribute_shop_fail_url,
         )
         self.access = AccessService(
             session_factory=self.session_factory,

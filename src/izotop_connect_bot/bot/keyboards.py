@@ -12,6 +12,7 @@ def home_keyboard(
     is_admin: bool,
     buy_url: str,
     support_url: str,
+    show_white_internet: bool = False,
 ) -> InlineKeyboardMarkup:
     rows = []
     if state == "active":
@@ -24,6 +25,16 @@ def home_keyboard(
                 )
             ]
         )
+        if show_white_internet:
+            rows.append(
+                [
+                    InlineKeyboardButton(
+                        text="Белый интернет",
+                        callback_data="home:white",
+                        style=ButtonStyle.PRIMARY,
+                    )
+                ]
+            )
     else:
         rows.append(
             [
@@ -53,6 +64,31 @@ def home_keyboard(
     if is_admin:
         rows.append([InlineKeyboardButton(text="Админка", callback_data="admin:menu", style=ButtonStyle.PRIMARY)])
     return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def white_internet_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(text="50 GB", callback_data="white:buy:50", style=ButtonStyle.PRIMARY),
+                InlineKeyboardButton(text="100 GB", callback_data="white:buy:100", style=ButtonStyle.PRIMARY),
+            ],
+            [
+                InlineKeyboardButton(text="250 GB", callback_data="white:buy:250", style=ButtonStyle.PRIMARY),
+            ],
+            [InlineKeyboardButton(text="Назад", callback_data="home:root")],
+        ]
+    )
+
+
+def white_checkout_keyboard(payment_url: str) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="Перейти к оплате", url=payment_url, style=ButtonStyle.PRIMARY)],
+            [InlineKeyboardButton(text="Назад к пакетам", callback_data="home:white")],
+            [InlineKeyboardButton(text="Назад", callback_data="home:root")],
+        ]
+    )
 
 
 def device_keyboard(*, prefix: str) -> InlineKeyboardMarkup:
@@ -129,6 +165,7 @@ def admin_keyboard() -> InlineKeyboardMarkup:
         inline_keyboard=[
             [InlineKeyboardButton(text="Все пользователи", callback_data="admin:users", style=ButtonStyle.PRIMARY)],
             [InlineKeyboardButton(text="Активные", callback_data="admin:active")],
+            [InlineKeyboardButton(text="Обновить white всем", callback_data="admin:white_sync_all")],
             [InlineKeyboardButton(text="Рассылка", callback_data="admin:broadcast_menu")],
             [InlineKeyboardButton(text="Webhook events", callback_data="admin:webhooks")],
             [InlineKeyboardButton(text="Продлить доступ", callback_data="admin:extend_prompt")],

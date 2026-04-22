@@ -127,6 +127,8 @@ def welcome_text(
     *,
     state: SubscriptionState,
     expires_at: datetime | None,
+    device_limit: int | None = None,
+    white_traffic_remaining: str | None = None,
 ) -> str:
     if state == "active":
         status_line = f"Активна\nдо {format_expiry_long_date(expires_at)}"
@@ -137,11 +139,48 @@ def welcome_text(
     else:
         status_line = "Не оформлена"
         hint_line = "Оформить подписку ниже"
-    return (
+    lines = [
         f"Привет, {name}!\n\n"
         "Izotop Connect — быстрое, стабильное и безопасное подключение к интернету\n\n"
         f"<b>Подписка</b>: {status_line}\n"
-        f"\n<i>{hint_line}</i>"
+    ]
+    if state == "active" and device_limit is not None:
+        lines.append(f"<b>Количество устройств</b>: {device_limit}\n")
+    if state == "active" and white_traffic_remaining is not None:
+        lines.append(f"Осталось гигабайт белого трафика: {white_traffic_remaining}\n")
+    lines.append(f"<i>{hint_line}</i>")
+    return "\n".join(lines)
+
+
+def format_white_traffic_gb(remaining_bytes: int | None, *, is_unlimited: bool = False) -> str:
+    if is_unlimited:
+        return "безлимитно"
+    if remaining_bytes is None:
+        return "~0,00 гигабайт"
+    gigabytes = max(0.0, remaining_bytes / (1024**3))
+    return f"~{gigabytes:.2f}".replace(".", ",") + " гигабайт"
+
+
+def white_internet_text(*, white_traffic_remaining: str) -> str:
+    return (
+        "<b>Белый интернет</b>\n\n"
+        f"Сейчас доступно: <b>{white_traffic_remaining}</b>\n\n"
+        "Тут будет отдельное объяснение, кому и когда нужен этот режим.\n\n"
+        "<b>Пакеты трафика:</b>\n"
+        "50 GB\n"
+        "100 GB\n"
+        "250 GB\n\n"
+        "Выбери пакет ниже, и бот создаст отдельную оплату через Tribute."
+    )
+
+
+def white_checkout_text(*, white_traffic_remaining: str, gigabytes: int, amount_rub: int) -> str:
+    return (
+        "<b>Белый интернет</b>\n\n"
+        f"Сейчас доступно: <b>{white_traffic_remaining}</b>\n\n"
+        f"Подготовил оплату пакета <b>{gigabytes} GB</b>.\n"
+        f"Сумма: <b>{amount_rub} ₽</b>\n\n"
+        "Нажми кнопку ниже, чтобы перейти в Tribute и оплатить этот пакет."
     )
 
 

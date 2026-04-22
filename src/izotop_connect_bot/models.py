@@ -26,6 +26,9 @@ class User(Base):
 
     subscription: Mapped["Subscription"] = relationship(back_populates="user", uselist=False)
     vpn_account: Mapped["VpnAccount"] = relationship(back_populates="user", uselist=False)
+    white_vpn_account: Mapped["WhiteVpnAccount"] = relationship(back_populates="user", uselist=False)
+    white_traffic_cycles: Mapped[list["WhiteTrafficCycle"]] = relationship(back_populates="user")
+    white_topup_orders: Mapped[list["WhiteTopUpOrder"]] = relationship(back_populates="user")
 
 
 class Subscription(Base):
@@ -65,6 +68,63 @@ class VpnAccount(Base):
     )
 
     user: Mapped[User] = relationship(back_populates="vpn_account")
+
+
+class WhiteVpnAccount(Base):
+    __tablename__ = "white_vpn_accounts"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    telegram_user_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("users.telegram_user_id"), unique=True, index=True
+    )
+    remnawave_user_uuid: Mapped[str] = mapped_column(String(64), nullable=False)
+    remnawave_username: Mapped[str] = mapped_column(String(64), nullable=False)
+    subscription_url: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    last_issued_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+    user: Mapped[User] = relationship(back_populates="white_vpn_account")
+
+
+class WhiteTrafficCycle(Base):
+    __tablename__ = "white_traffic_cycles"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    telegram_user_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("users.telegram_user_id"), index=True
+    )
+    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True)
+    free_bytes: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    start_used_bytes: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    end_used_bytes: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    user: Mapped[User] = relationship(back_populates="white_traffic_cycles")
+
+
+class WhiteTopUpOrder(Base):
+    __tablename__ = "white_topup_orders"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    telegram_user_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("users.telegram_user_id"), index=True
+    )
+    order_uuid: Mapped[str] = mapped_column(String(64), unique=True, index=True, nullable=False)
+    granted_bytes: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    amount_minor: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    currency: Mapped[str] = mapped_column(String(16), nullable=False, default="rub")
+    title: Mapped[str] = mapped_column(String(255), nullable=False)
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default="pending")
+    payment_url: Mapped[str | None] = mapped_column(Text, nullable=True)
+    webapp_payment_url: Mapped[str | None] = mapped_column(Text, nullable=True)
+    payload_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    paid_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    user: Mapped[User] = relationship(back_populates="white_topup_orders")
 
 
 class WebhookEvent(Base):
