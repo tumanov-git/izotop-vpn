@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from html import escape
 from typing import Iterable, Literal
 
 from izotop_connect_bot.repositories import AdminUserRow, WebhookEventRow
@@ -211,7 +212,35 @@ def admin_users_list_text(rows: Iterable[AdminUserRow], *, title: str) -> str:
     rows = list(rows)
     if not rows:
         return f"<b>{title}</b>\n\nСписок пока пуст."
-    lines = [f"<b>{title}</b>", ""]
+    return "\n".join([f"<b>{title}</b>", ""] + _admin_user_rows(rows))
+
+
+def paginated_admin_users_list_text(
+    rows: Iterable[AdminUserRow],
+    *,
+    title: str,
+    total: int,
+    offset: int,
+    limit: int,
+) -> str:
+    rows = list(rows)
+    if total <= 0 or not rows:
+        return f"<b>{title}</b>\n\nСписок пока пуст."
+    page = offset // limit + 1
+    page_count = (total + limit - 1) // limit
+    lines = [
+        f"<b>{title}</b>",
+        "",
+        f"Показано: <b>{offset + 1}-{offset + len(rows)}</b> из <b>{total}</b>",
+        f"Страница: <b>{page}/{page_count}</b>",
+        "",
+        *_admin_user_rows(rows),
+    ]
+    return "\n".join(lines)
+
+
+def _admin_user_rows(rows: Iterable[AdminUserRow]) -> list[str]:
+    lines: list[str] = []
     for row in rows:
         username = f"@{row.telegram_username}" if row.telegram_username else "без username"
         marker = "ACTIVE" if row.is_active else "INACTIVE"
@@ -219,7 +248,7 @@ def admin_users_list_text(rows: Iterable[AdminUserRow], *, title: str) -> str:
         lines.append(
             f"<code>{row.telegram_user_id}</code> | {username} | {marker} | {vpn} | {format_expiry(row.expires_at)}"
         )
-    return "\n".join(lines)
+    return lines
 
 
 def admin_webhooks_text(rows: Iterable[WebhookEventRow]) -> str:
@@ -231,6 +260,33 @@ def admin_webhooks_text(rows: Iterable[WebhookEventRow]) -> str:
         processed = format_expiry(row.processed_at)
         lines.append(f"{processed} | <b>{row.event_name}</b>\n<code>{row.event_key}</code>")
     return "\n\n".join(lines)
+
+
+def admin_broadcast_menu_text() -> str:
+    return (
+        "<b>Рассылка</b>\n\n"
+        "Выбери аудиторию.\n"
+        "Можно отправить сообщение всем пользователям или только тем, кто активировал конкретный промокод."
+    )
+
+
+def admin_broadcast_confirm_text(
+    *,
+    audience_label: str,
+    recipients_count: int,
+    message_text: str,
+) -> str:
+    preview = message_text.strip() or "пусто"
+    if len(preview) > 700:
+        preview = preview[:700].rstrip() + "..."
+    preview = escape(preview)
+    return (
+        "<b>Подтверждение рассылки</b>\n\n"
+        f"<b>Аудитория:</b> {audience_label}\n"
+        f"<b>Получателей:</b> {recipients_count}\n\n"
+        "<b>Текст сообщения:</b>\n"
+        f"{preview}"
+    )
 
 
 def faq_text(item_key: str | None = None) -> str:
