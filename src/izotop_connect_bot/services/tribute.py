@@ -5,15 +5,24 @@ import hmac
 import json
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from decimal import Decimal, InvalidOperation
 from typing import Any
-
-import httpx
 
 
 def parse_datetime(value: str | None) -> datetime | None:
     if not value:
         return None
     return datetime.fromisoformat(value.replace("Z", "+00:00")).astimezone(UTC)
+
+
+def parse_amount_minor(value: Any) -> int | None:
+    if value in (None, ""):
+        return None
+    try:
+        amount = Decimal(str(value))
+    except (InvalidOperation, ValueError):
+        return None
+    return int((amount * 100).to_integral_value())
 
 
 @dataclass(slots=True)
@@ -27,39 +36,14 @@ class TributeEvent:
     channel_id: int | None
     expires_at: datetime | None
     cancelled: bool
-    order_uuid: str | None
-    order_status: str | None
+    donation_request_id: int | None
+    amount_minor: int | None
+    currency: str | None
     raw_payload: dict[str, Any]
 
     @property
     def is_subscription_event(self) -> bool:
         return self.tribute_subscription_id is not None or self.event_name.endswith("_subscription")
-
-    @property
-    def is_shop_event(self) -> bool:
-        return self.order_uuid is not None or self.event_name.startswith("shop_")
-
-    @property
-    def is_paid_shop_event(self) -> bool:
-        if not self.is_shop_event:
-            return False
-        status = (self.order_status or "").strip().casefold()
-        return self.event_name in {"shop_order", "shop_order_charge_success"} or status in {
-            "paid",
-            "success",
-        }
-
-
-@dataclass(frozen=True, slots=True)
-class TributeShopOrder:
-    order_uuid: str
-    status: str
-    payment_url: str | None
-    webapp_payment_url: str | None
-    amount_minor: int
-    currency: str
-    title: str
-    raw_payload: dict[str, Any]
 
 
 class TributeService:
@@ -68,17 +52,9 @@ class TributeService:
         *,
         secret: str,
         signature_header: str = "trbt-signature",
-        api_key: str | None = None,
-        shop_base_url: str = "https://tribute.tg/api/v1",
-        success_url: str | None = None,
-        fail_url: str | None = None,
     ) -> None:
         self.secret = secret
         self.signature_header = signature_header.lower()
-        self.api_key = api_key
-        self.shop_base_url = shop_base_url.rstrip("/")
-        self.success_url = success_url
-        self.fail_url = fail_url
 
     def verify_signature(self, headers: dict[str, str], body: bytes) -> bool:
         received = ""
@@ -89,15 +65,9 @@ class TributeService:
         if not received:
             return False
         received = received.removeprefix("sha256=").strip()
-        candidate_secrets = [self.secret]
-        if self.api_key and self.api_key != self.secret:
-            candidate_secrets.append(self.api_key)
-        return any(
-            hmac.compare_digest(
-                received,
-                hmac.new(secret.encode("utf-8"), body, hashlib.sha256).hexdigest(),
-            )
-            for secret in candidate_secrets
+        return hmac.compare_digest(
+            received,
+            hmac.new(self.secret.encode("utf-8"), body, hashlib.sha256).hexdigest(),
         )
 
     def parse_event(self, payload: dict[str, Any]) -> TributeEvent:
@@ -105,13 +75,12 @@ class TributeService:
         data = payload.get("payload", {}) or {}
         telegram_user_id = data.get("telegram_user_id")
         subscription_id = data.get("subscription_id")
-        order_uuid = data.get("uuid") or data.get("id")
-        order_status = data.get("status")
+        donation_request_id = data.get("donation_request_id")
         created_at = payload.get("created_at") or payload.get("sent_at") or data.get("createdAt") or ""
         expires_at = parse_datetime(data.get("expires_at"))
         event_key_parts = [event_name, str(created_at)]
-        if order_uuid:
-            event_key_parts.append(str(order_uuid))
+        if donation_request_id is not None:
+            event_key_parts.append(str(donation_request_id))
         else:
             event_key_parts.extend(
                 [
@@ -130,65 +99,10 @@ class TributeService:
             channel_id=int(data["channel_id"]) if data.get("channel_id") is not None else None,
             expires_at=expires_at,
             cancelled=event_name == "cancelled_subscription",
-            order_uuid=str(order_uuid) if order_uuid else None,
-            order_status=str(order_status) if order_status is not None else None,
+            donation_request_id=int(donation_request_id) if donation_request_id is not None else None,
+            amount_minor=parse_amount_minor(data.get("amount")),
+            currency=str(data.get("currency")).strip().casefold() if data.get("currency") is not None else None,
             raw_payload=payload,
-        )
-
-    async def create_shop_order(
-        self,
-        *,
-        customer_id: str,
-        title: str,
-        amount_minor: int,
-        currency: str,
-        description: str | None = None,
-        comment: str | None = None,
-        success_url: str | None = None,
-        fail_url: str | None = None,
-    ) -> TributeShopOrder:
-        api_key = self.api_key or self.secret
-        payload: dict[str, Any] = {
-            "title": title,
-            "amount": amount_minor,
-            "currency": currency,
-            "customerId": customer_id,
-            "period": "onetime",
-        }
-        if description:
-            payload["description"] = description
-        if comment:
-            payload["comment"] = comment
-        if success_url or self.success_url:
-            payload["successUrl"] = success_url or self.success_url
-        if fail_url or self.fail_url:
-            payload["failUrl"] = fail_url or self.fail_url
-
-        async with httpx.AsyncClient(timeout=20.0) as client:
-            response = await client.post(
-                f"{self.shop_base_url}/shop/orders",
-                json=payload,
-                headers={
-                    "Api-Key": api_key,
-                    "Content-Type": "application/json",
-                },
-            )
-            response.raise_for_status()
-            raw_payload = response.json()
-
-        data = raw_payload.get("payload", raw_payload)
-        order_uuid = str(data.get("uuid") or data.get("id") or "")
-        if not order_uuid:
-            raise ValueError("Tribute order response does not contain order uuid")
-        return TributeShopOrder(
-            order_uuid=order_uuid,
-            status=str(data.get("status") or "pending"),
-            payment_url=data.get("paymentUrl") or data.get("payment_url"),
-            webapp_payment_url=data.get("webAppUrl") or data.get("webapp_payment_url"),
-            amount_minor=int(data.get("amount") or amount_minor),
-            currency=str(data.get("currency") or currency),
-            title=str(data.get("title") or title),
-            raw_payload=raw_payload,
         )
 
     @staticmethod

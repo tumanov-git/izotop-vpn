@@ -66,29 +66,33 @@ def home_keyboard(
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
-def white_internet_keyboard() -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(
-        inline_keyboard=[
-            [
-                InlineKeyboardButton(text="50 GB", callback_data="white:buy:50", style=ButtonStyle.PRIMARY),
-                InlineKeyboardButton(text="100 GB", callback_data="white:buy:100", style=ButtonStyle.PRIMARY),
-            ],
-            [
-                InlineKeyboardButton(text="250 GB", callback_data="white:buy:250", style=ButtonStyle.PRIMARY),
-            ],
-            [InlineKeyboardButton(text="Назад", callback_data="home:root")],
+def white_internet_keyboard(
+    *,
+    url_50gb: str | None,
+    url_100gb: str | None,
+    url_250gb: str | None,
+) -> InlineKeyboardMarkup:
+    rows: list[list[InlineKeyboardButton]] = []
+    first_row: list[InlineKeyboardButton] = []
+    if url_50gb:
+        first_row.append(InlineKeyboardButton(text="50 GB · 110 ₽", url=url_50gb, style=ButtonStyle.PRIMARY))
+    if url_100gb:
+        first_row.append(InlineKeyboardButton(text="100 GB · 220 ₽", url=url_100gb, style=ButtonStyle.PRIMARY))
+    if first_row:
+        rows.append(first_row)
+    if url_250gb:
+        rows.append([InlineKeyboardButton(text="250 GB · 550 ₽", url=url_250gb, style=ButtonStyle.PRIMARY)])
+    rows.append(
+        [
+            InlineKeyboardButton(
+                text="Получить доступ",
+                callback_data="white:access",
+                style=ButtonStyle.SUCCESS,
+            )
         ]
     )
-
-
-def white_checkout_keyboard(payment_url: str) -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(
-        inline_keyboard=[
-            [InlineKeyboardButton(text="Перейти к оплате", url=payment_url, style=ButtonStyle.PRIMARY)],
-            [InlineKeyboardButton(text="Назад к пакетам", callback_data="home:white")],
-            [InlineKeyboardButton(text="Назад", callback_data="home:root")],
-        ]
-    )
+    rows.append([InlineKeyboardButton(text="Назад", callback_data="home:root")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
 def device_keyboard(*, prefix: str) -> InlineKeyboardMarkup:
@@ -114,6 +118,15 @@ def access_result_keyboard(subscription_url: str) -> InlineKeyboardMarkup:
             [InlineKeyboardButton(text="Открыть доступ", url=subscription_url, style=ButtonStyle.SUCCESS)],
             [InlineKeyboardButton(text="Показать QR", callback_data="key:qr", style=ButtonStyle.PRIMARY)],
             [InlineKeyboardButton(text="Назад", callback_data="home:root")],
+        ]
+    )
+
+
+def white_access_result_keyboard(subscription_url: str) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="Открыть доступ", url=subscription_url, style=ButtonStyle.SUCCESS)],
+            [InlineKeyboardButton(text="Назад", callback_data="home:white")],
         ]
     )
 
@@ -166,6 +179,7 @@ def admin_keyboard() -> InlineKeyboardMarkup:
             [InlineKeyboardButton(text="Все пользователи", callback_data="admin:users", style=ButtonStyle.PRIMARY)],
             [InlineKeyboardButton(text="Активные", callback_data="admin:active")],
             [InlineKeyboardButton(text="Обновить white всем", callback_data="admin:white_sync_all")],
+            [InlineKeyboardButton(text="Начислить white GB", callback_data="admin:white_topup_prompt")],
             [InlineKeyboardButton(text="Рассылка", callback_data="admin:broadcast_menu")],
             [InlineKeyboardButton(text="Webhook events", callback_data="admin:webhooks")],
             [InlineKeyboardButton(text="Продлить доступ", callback_data="admin:extend_prompt")],

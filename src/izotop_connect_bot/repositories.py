@@ -73,8 +73,11 @@ class UserRepository:
     ) -> int:
         if not active_only:
             return await session.scalar(select(func.count()).select_from(User)) or 0
-        subscriptions = (await session.execute(select(Subscription))).scalars().all()
-        return sum(1 for item in subscriptions if subscription_is_active(item))
+        query = select(func.count()).select_from(Subscription).where(
+            Subscription.expires_at.is_not(None),
+            Subscription.expires_at > utcnow(),
+        )
+        return await session.scalar(query) or 0
 
     async def upsert_user(
         self,
@@ -86,6 +89,7 @@ class UserRepository:
         language_code: str | None,
         is_admin: bool,
         device_limit: int | None = None,
+        preserve_missing_fields: bool = False,
     ) -> User:
         user = await session.get(User, telegram_user_id)
         if user is None:
@@ -99,9 +103,17 @@ class UserRepository:
             )
             session.add(user)
         else:
-            user.telegram_username = telegram_username
-            user.first_name = first_name
-            user.language_code = language_code
+            if preserve_missing_fields:
+                if telegram_username is not None:
+                    user.telegram_username = telegram_username
+                if first_name is not None:
+                    user.first_name = first_name
+                if language_code is not None:
+                    user.language_code = language_code
+            else:
+                user.telegram_username = telegram_username
+                user.first_name = first_name
+                user.language_code = language_code
             user.is_admin = is_admin
             if device_limit is not None:
                 user.device_limit = device_limit
@@ -155,7 +167,13 @@ class UserRepository:
         limit: int = 25,
         offset: int = 0,
     ) -> list[AdminUserRow]:
-        query = select(User).order_by(User.created_at.desc()).offset(offset).limit(limit)
+        query = select(User)
+        if active_only:
+            query = (
+                query.join(Subscription, Subscription.telegram_user_id == User.telegram_user_id)
+                .where(Subscription.expires_at.is_not(None), Subscription.expires_at > utcnow())
+            )
+        query = query.order_by(User.created_at.desc()).offset(offset).limit(limit)
         users = (await session.execute(query)).scalars().all()
         rows: list[AdminUserRow] = []
         for user in users:
@@ -166,8 +184,6 @@ class UserRepository:
                 select(VpnAccount).where(VpnAccount.telegram_user_id == user.telegram_user_id)
             )
             is_active = subscription_is_active(subscription)
-            if active_only and not is_active:
-                continue
             rows.append(
                 AdminUserRow(
                     telegram_user_id=user.telegram_user_id,
@@ -402,7 +418,7 @@ class WhiteTrafficCycleRepository:
 
 
 class WhiteTopUpOrderRepository:
-    PAID_STATUSES = {"paid", "shop_order", "shop_order_charge_success"}
+    PAID_STATUSES = {"paid", "shop_order", "shop_order_charge_success", "new_donation", "recurrent_donation", "admin_manual"}
 
     async def get_by_order_uuid(
         self,

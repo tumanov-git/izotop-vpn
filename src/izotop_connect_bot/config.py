@@ -22,10 +22,6 @@ class Settings(BaseSettings):
 
     tribute_webhook_secret: str = Field(alias="TRIBUTE_WEBHOOK_SECRET")
     tribute_signature_header: str = Field(default="trbt-signature", alias="TRIBUTE_SIGNATURE_HEADER")
-    tribute_api_key: str | None = Field(default=None, alias="TRIBUTE_API_KEY")
-    tribute_shop_base_url: str = Field(default="https://tribute.tg/api/v1", alias="TRIBUTE_SHOP_BASE_URL")
-    tribute_shop_success_url: str | None = Field(default=None, alias="TRIBUTE_SHOP_SUCCESS_URL")
-    tribute_shop_fail_url: str | None = Field(default=None, alias="TRIBUTE_SHOP_FAIL_URL")
 
     remnawave_base_url: str = Field(alias="REMNAWAVE_BASE_URL")
     remnawave_token: str = Field(alias="REMNAWAVE_TOKEN")
@@ -47,10 +43,21 @@ class Settings(BaseSettings):
     remnawave_ssl_ignore: bool = Field(default=False, alias="REMNAWAVE_SSL_IGNORE")
     white_monthly_free_gb: int = Field(default=5, alias="WHITE_MONTHLY_FREE_GB")
     white_unlimited_user_ids: tuple[int, ...] = Field(default_factory=tuple, alias="WHITE_UNLIMITED_USER_IDS")
-    white_price_per_gb_rub: int = Field(default=2, alias="WHITE_PRICE_PER_GB_RUB")
     white_price_50gb_rub: int = Field(default=110, alias="WHITE_PRICE_50GB_RUB")
     white_price_100gb_rub: int = Field(default=220, alias="WHITE_PRICE_100GB_RUB")
     white_price_250gb_rub: int = Field(default=550, alias="WHITE_PRICE_250GB_RUB")
+    white_donation_50gb_url: str | None = Field(
+        default="https://t.me/tribute/app?startapp=dJ8G",
+        alias="WHITE_DONATION_50GB_URL",
+    )
+    white_donation_100gb_url: str | None = Field(
+        default="https://t.me/tribute/app?startapp=dJ8I",
+        alias="WHITE_DONATION_100GB_URL",
+    )
+    white_donation_250gb_url: str | None = Field(
+        default="https://t.me/tribute/app?startapp=dJ8J",
+        alias="WHITE_DONATION_250GB_URL",
+    )
 
     database_url: str = Field(
         default="sqlite+aiosqlite:///./data/izotop_connect.db", alias="DATABASE_URL"
@@ -73,10 +80,6 @@ class Settings(BaseSettings):
         if isinstance(value, (list, tuple)):
             return tuple(int(item) for item in value)
         return tuple(int(item.strip()) for item in str(value).split(",") if item.strip())
-
-    @property
-    def tribute_effective_api_key(self) -> str:
-        return self.tribute_api_key or self.tribute_webhook_secret
 
     @property
     def webhook_path(self) -> str:

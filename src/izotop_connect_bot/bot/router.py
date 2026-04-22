@@ -30,7 +30,7 @@ from izotop_connect_bot.bot.keyboards import (
     home_keyboard,
     keys_keyboard,
     promo_entry_keyboard,
-    white_checkout_keyboard,
+    white_access_result_keyboard,
     white_internet_keyboard,
 )
 from izotop_connect_bot.bot.texts import (
@@ -48,7 +48,6 @@ from izotop_connect_bot.bot.texts import (
     keys_text,
     paginated_admin_users_list_text,
     welcome_text,
-    white_checkout_text,
     white_internet_text,
 )
 from izotop_connect_bot.config import Settings
@@ -61,6 +60,7 @@ class AdminStates(StatesGroup):
     waiting_for_manual_import = State()
     waiting_for_extend_access = State()
     waiting_for_device_limit = State()
+    waiting_for_white_topup = State()
     waiting_for_promo_code_text = State()
     waiting_for_promo_create_meta = State()
     waiting_for_broadcast_promo_code = State()
@@ -80,9 +80,6 @@ STATUS_PICTURES: dict[SubscriptionState, Path] = {
     "active": PICS_DIR / "sub_active.png",
     "inactive": PICS_DIR / "sub_inactive.png",
 }
-WHITE_TOPUP_PACKAGES = {50, 100, 250}
-
-
 def _display_name(message: Message) -> str:
     return message.from_user.first_name if message.from_user else "друг"
 
@@ -154,6 +151,7 @@ async def _render_home_dashboard(
 async def _render_white_internet_screen(
     message: Message,
     access_service: AccessService,
+    settings: Settings,
     access: AccessBundle,
     telegram_user_id: int,
 ) -> None:
@@ -163,11 +161,19 @@ async def _render_white_internet_screen(
         + getattr(white_access, "purchased_remaining_bytes", 0),
         is_unlimited=getattr(white_access, "is_unlimited", False),
     )
+    is_unlimited = bool(getattr(white_access, "is_unlimited", False))
     await _render_user_screen(
         message,
         access,
-        white_internet_text(white_traffic_remaining=white_traffic_remaining),
-        reply_markup=white_internet_keyboard(),
+        white_internet_text(
+            white_traffic_remaining=white_traffic_remaining,
+            is_unlimited=is_unlimited,
+        ),
+        reply_markup=white_internet_keyboard(
+            url_50gb=None if is_unlimited else settings.white_donation_50gb_url,
+            url_100gb=None if is_unlimited else settings.white_donation_100gb_url,
+            url_250gb=None if is_unlimited else settings.white_donation_250gb_url,
+        ),
     )
 
 
@@ -503,57 +509,71 @@ def create_router(access_service: AccessService, settings: Settings) -> Router:
         await _render_white_internet_screen(
             callback.message,
             access_service,
+            settings,
             access,
             callback.from_user.id,
         )
         await callback.answer()
 
-    @router.callback_query(F.data.startswith("white:buy:"))
-    async def on_white_buy(callback: CallbackQuery) -> None:
+    @router.callback_query(F.data == "white:access")
+    async def on_white_access(callback: CallbackQuery) -> None:
         if not callback.from_user or not callback.message:
             return
         access = await access_service.get_access_bundle(callback.from_user.id)
         if not access.is_active:
-            await callback.answer("Нужна активная подписка", show_alert=True)
+            await callback.answer("Белый интернет доступен только при активной подписке", show_alert=True)
             return
-        _, _, raw_gigabytes = callback.data.split(":")
-        gigabytes = int(raw_gigabytes)
-        if gigabytes not in WHITE_TOPUP_PACKAGES:
-            await callback.answer("Такой пакет пока недоступен", show_alert=True)
-            return
-        try:
-            checkout = await access_service.create_white_topup_checkout(
-                telegram_user_id=callback.from_user.id,
-                gigabytes=gigabytes,
-            )
-        except PermissionError as exc:
-            await callback.answer(str(exc), show_alert=True)
-            return
-        except Exception:
-            await callback.answer("Не получилось создать оплату, попробуй ещё раз", show_alert=True)
-            return
-
         white_access = await access_service.get_white_access_state(callback.from_user.id)
-        white_traffic_remaining = format_white_traffic_gb(
-            getattr(white_access, "current_free_remaining_bytes", 0)
-            + getattr(white_access, "purchased_remaining_bytes", 0),
-            is_unlimited=getattr(white_access, "is_unlimited", False),
-        )
-        payment_url = checkout.webapp_payment_url or checkout.payment_url
-        if not payment_url:
-            await callback.answer("Tribute не вернул ссылку на оплату", show_alert=True)
+        if not getattr(white_access, "is_enabled", False) or getattr(white_access, "vpn_account", None) is None:
+            await callback.answer("Белый интернет пока не настроен", show_alert=True)
             return
         await _render_user_screen(
             callback.message,
             access,
-            white_checkout_text(
-                white_traffic_remaining=white_traffic_remaining,
-                gigabytes=checkout.gigabytes,
-                amount_rub=checkout.amount_rub,
-            ),
-            reply_markup=white_checkout_keyboard(payment_url),
+            "Выбери устройство. Мы дадим короткую инструкцию и белый доступ.",
+            reply_markup=device_keyboard(prefix="whiteaccess"),
         )
         await callback.answer()
+
+    @router.callback_query(F.data.startswith("whiteaccess:"))
+    async def on_white_access_device(callback: CallbackQuery) -> None:
+        if not callback.from_user or not callback.message:
+            return
+        _, device = callback.data.split(":", 1)
+        guide = DEVICE_GUIDES[device]
+        access = await access_service.get_access_bundle(callback.from_user.id)
+        if not access.is_active:
+            await _render_user_screen(
+                callback.message,
+                access,
+                inactive_access_text(state=_subscription_state(access)),
+                reply_markup=home_keyboard(
+                    state=_subscription_state(access),
+                    is_admin=_is_admin(callback, settings),
+                    buy_url=settings.bot_buy_url,
+                    support_url=settings.bot_support_url,
+                ),
+            )
+            await callback.answer()
+            return
+
+        white_access = await access_service.get_white_access_state(callback.from_user.id)
+        white_vpn_account = getattr(white_access, "vpn_account", None)
+        if not getattr(white_access, "is_enabled", False) or white_vpn_account is None:
+            await callback.answer("Белый интернет пока не настроен", show_alert=True)
+            return
+
+        await _render_user_screen(
+            callback.message,
+            access,
+            f"<b>{guide['title']}</b>\n\n{guide['body']}\n\n"
+            f"{keys_text(expires_at=access.expires_at, subscription_url=white_vpn_account.subscription_url)}",
+            reply_markup=white_access_result_keyboard(
+                _access_url(settings, white_vpn_account.subscription_url)
+            ),
+            refresh_media=True,
+        )
+        await callback.answer("Белый доступ готов")
 
     @router.callback_query(F.data == "home:keys")
     async def on_keys(callback: CallbackQuery) -> None:
@@ -908,6 +928,26 @@ def create_router(access_service: AccessService, settings: Settings) -> Router:
         )
         await callback.answer()
 
+    @router.callback_query(F.data == "admin:white_topup_prompt")
+    async def on_admin_white_topup_prompt(callback: CallbackQuery, state: FSMContext) -> None:
+        if not _is_admin(callback, settings) or not callback.message:
+            await callback.answer("Нет доступа", show_alert=True)
+            return
+        await state.clear()
+        await state.set_state(AdminStates.waiting_for_white_topup)
+        await _render_admin_screen(
+            callback.message,
+            "Пришли строку в формате:\n"
+            "<code>telegram_user_id гигабайты</code>\n"
+            "или\n"
+            "<code>@username гигабайты</code>\n\n"
+            "Примеры:\n"
+            "<code>123456789 50</code>\n"
+            "<code>@some_user 250</code>",
+            reply_markup=admin_cancel_keyboard(),
+        )
+        await callback.answer()
+
     @router.message(AdminStates.waiting_for_lookup)
     async def on_admin_lookup(message: Message, state: FSMContext) -> None:
         if not _is_admin(message, settings):
@@ -989,6 +1029,42 @@ def create_router(access_service: AccessService, settings: Settings) -> Router:
             return
         await message.answer(
             f"Лимит устройств обновлён до <b>{device_limit}</b>.\n\n{_admin_user_text(access)}",
+            reply_markup=admin_user_keyboard(
+                access.user.telegram_user_id,
+                has_access=access.vpn_account is not None,
+            ),
+        )
+        await state.clear()
+
+    @router.message(AdminStates.waiting_for_white_topup)
+    async def on_admin_white_topup(message: Message, state: FSMContext) -> None:
+        if not _is_admin(message, settings):
+            return
+        parsed = _split_lookup_value(message.text or "")
+        if parsed is None:
+            await message.answer(
+                "Нужен формат: <code>telegram_user_id гигабайты</code> или <code>@username гигабайты</code>."
+            )
+            return
+        lookup, raw_gigabytes = parsed
+        try:
+            gigabytes = int(raw_gigabytes)
+        except ValueError:
+            await message.answer("Количество гигабайт должно быть целым числом.")
+            return
+        if gigabytes <= 0:
+            await message.answer("Количество гигабайт должно быть больше нуля.")
+            return
+        access = await access_service.admin_grant_white_traffic(
+            lookup=lookup,
+            gigabytes=gigabytes,
+            granted_by_admin=message.from_user.id,
+        )
+        if access is None or access.user is None:
+            await message.answer("Пользователь не найден.")
+            return
+        await message.answer(
+            f"Начислил <b>{gigabytes} GB</b> белого трафика.\n\n{_admin_user_text(access)}",
             reply_markup=admin_user_keyboard(
                 access.user.telegram_user_id,
                 has_access=access.vpn_account is not None,

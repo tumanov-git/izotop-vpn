@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import hashlib
 import json
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Any
+from uuid import uuid4
 
 from aiogram.types import User as TgUser
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
@@ -54,16 +56,6 @@ class WhiteAccessState:
     traffic_limit_bytes: int | None
 
 
-@dataclass(frozen=True, slots=True)
-class WhiteTopUpCheckout:
-    order_uuid: str
-    title: str
-    gigabytes: int
-    amount_rub: int
-    payment_url: str | None
-    webapp_payment_url: str | None
-
-
 def normalize_promo_code(code: str) -> str:
     return code.replace("\r\n", "\n").strip()
 
@@ -110,15 +102,31 @@ class AccessService:
     def _is_white_unlimited(self, telegram_user_id: int) -> bool:
         return telegram_user_id in self.settings.white_unlimited_user_ids
 
-    def _white_topup_amount_rub(self, gigabytes: int) -> int:
+    def _resolve_white_topup_gigabytes(
+        self,
+        *,
+        amount_minor: int | None,
+        currency: str | None,
+    ) -> int | None:
+        if amount_minor is None:
+            return None
+        currency_value = (currency or "rub").strip().casefold()
+        if currency_value not in {"rub", "rur"}:
+            return None
+        amount_rub = amount_minor // 100
         price_map = {
-            50: self.settings.white_price_50gb_rub,
-            100: self.settings.white_price_100gb_rub,
-            250: self.settings.white_price_250gb_rub,
+            self.settings.white_price_50gb_rub: 50,
+            self.settings.white_price_100gb_rub: 100,
+            self.settings.white_price_250gb_rub: 250,
         }
-        if gigabytes in price_map:
-            return price_map[gigabytes]
-        return gigabytes * self.settings.white_price_per_gb_rub
+        return price_map.get(amount_rub) if amount_rub * 100 == amount_minor else None
+
+    @staticmethod
+    def _white_donation_order_uuid(event: TributeEvent) -> str:
+        if event.donation_request_id is not None:
+            return f"donation:{event.donation_request_id}"
+        digest = hashlib.sha256(event.event_key.encode("utf-8")).hexdigest()
+        return f"donation:{digest[:48]}"
 
     async def _sync_regular_account(
         self,
@@ -245,6 +253,19 @@ class AccessService:
             )
 
         if expires_at is None or expires_at <= datetime.now(UTC):
+            latest_cycle = await self.white_traffic_cycles.get_latest_cycle(session, user.telegram_user_id)
+            if (
+                latest_cycle is not None
+                and latest_cycle.start_used_bytes is not None
+                and latest_cycle.end_used_bytes is None
+            ):
+                latest_cycle.end_used_bytes = existing_used_bytes
+            purchased_remaining_bytes = await self._calculate_white_purchased_remaining_bytes(
+                session,
+                telegram_user_id=user.telegram_user_id,
+                current_used_bytes=existing_used_bytes,
+                active_cycle=None,
+            )
             remote = await self.remnawave.sync_white_access(
                 telegram_user_id=user.telegram_user_id,
                 telegram_username=user.telegram_username,
@@ -262,7 +283,7 @@ class AccessService:
                 is_unlimited=self._is_white_unlimited(user.telegram_user_id),
                 current_used_bytes=existing_used_bytes,
                 current_free_remaining_bytes=0,
-                purchased_remaining_bytes=0,
+                purchased_remaining_bytes=purchased_remaining_bytes,
                 traffic_limit_bytes=None,
             )
 
@@ -387,6 +408,7 @@ class AccessService:
             language_code=language_code,
             is_admin=telegram_user_id in self.settings.bot_admin_ids,
             device_limit=device_limit or self.settings.remnawave_default_device_limit,
+            preserve_missing_fields=True,
         )
         await self.subscriptions.upsert_subscription(
             session,
@@ -461,57 +483,6 @@ class AccessService:
                 session,
                 user=user,
                 expires_at=expires_at,
-            )
-
-    async def create_white_topup_checkout(
-        self,
-        *,
-        telegram_user_id: int,
-        gigabytes: int,
-    ) -> WhiteTopUpCheckout:
-        if gigabytes <= 0:
-            raise ValueError("Top-up size must be positive")
-
-        async with session_scope(self.session_factory) as session:
-            user = await self.users.get_user(session, telegram_user_id)
-            subscription = await self.subscriptions.get_subscription(session, telegram_user_id)
-            if user is None or not subscription_is_active(subscription):
-                raise PermissionError("Subscription inactive")
-            if self._is_white_unlimited(telegram_user_id):
-                raise PermissionError("Unlimited white access does not require top-up")
-
-            amount_rub = self._white_topup_amount_rub(gigabytes)
-            amount_minor = amount_rub * 100
-            title = f"{self.settings.bot_public_name} White {gigabytes} GB"
-            description = f"Разовый пакет белого трафика {gigabytes} GB"
-            shop_order = await self.tribute.create_shop_order(
-                customer_id=f"tg:{telegram_user_id}",
-                title=title,
-                amount_minor=amount_minor,
-                currency="rub",
-                description=description,
-                comment=f"white_topup:{telegram_user_id}:{gigabytes}",
-            )
-            await self.white_topup_orders.create(
-                session,
-                telegram_user_id=telegram_user_id,
-                order_uuid=shop_order.order_uuid,
-                granted_bytes=gigabytes * BYTES_PER_GB,
-                amount_minor=shop_order.amount_minor,
-                currency=shop_order.currency,
-                title=shop_order.title,
-                status=shop_order.status,
-                payment_url=shop_order.payment_url,
-                webapp_payment_url=shop_order.webapp_payment_url,
-                payload_json=self.tribute.dump_payload(shop_order.raw_payload),
-            )
-            return WhiteTopUpCheckout(
-                order_uuid=shop_order.order_uuid,
-                title=shop_order.title,
-                gigabytes=gigabytes,
-                amount_rub=amount_rub,
-                payment_url=shop_order.payment_url,
-                webapp_payment_url=shop_order.webapp_payment_url,
             )
 
     async def ensure_vpn_access(
@@ -593,7 +564,7 @@ class AccessService:
                     session,
                     telegram_user_id=event.telegram_user_id,
                     telegram_username=event.telegram_username,
-                    first_name=event.telegram_username,
+                    first_name=None,
                     language_code=None,
                     is_admin=event.telegram_user_id in self.settings.bot_admin_ids,
                     device_limit=(
@@ -601,6 +572,7 @@ class AccessService:
                         if existing_subscription and existing_subscription.source == "promo"
                         else None
                     ),
+                    preserve_missing_fields=True,
                 )
                 expires_at = ensure_utc(event.expires_at)
                 status = "ACTIVE" if expires_at and expires_at > datetime.now(UTC) else "INACTIVE"
@@ -626,22 +598,49 @@ class AccessService:
                     expires_at=expires_at if expires_at and expires_at > datetime.now(UTC) else None,
                 )
 
-            if event.is_shop_event and event.order_uuid:
-                order = await self.white_topup_orders.get_by_order_uuid(session, event.order_uuid)
-                if order is not None:
-                    order.status = event.order_status or event.event_name
-                    order.payload_json = self.tribute.dump_payload(payload)
-                    if event.is_paid_shop_event and order.paid_at is None:
-                        order.paid_at = datetime.now(UTC)
-                    user = await self.users.get_user(session, order.telegram_user_id)
-                    subscription = await self.subscriptions.get_subscription(session, order.telegram_user_id)
-                    expires_at = ensure_utc(subscription.expires_at) if subscription else None
-                    if user is not None:
-                        await self._sync_white_state(
+            if event.event_name == "new_donation" and event.telegram_user_id is not None:
+                gigabytes = self._resolve_white_topup_gigabytes(
+                    amount_minor=event.amount_minor,
+                    currency=event.currency,
+                )
+                if gigabytes is not None:
+                    user = await self.users.upsert_user(
+                        session,
+                        telegram_user_id=event.telegram_user_id,
+                        telegram_username=event.telegram_username,
+                        first_name=None,
+                        language_code=None,
+                        is_admin=event.telegram_user_id in self.settings.bot_admin_ids,
+                        device_limit=None,
+                        preserve_missing_fields=True,
+                    )
+                    donation_order_uuid = self._white_donation_order_uuid(event)
+                    order = await self.white_topup_orders.get_by_order_uuid(session, donation_order_uuid)
+                    if order is None:
+                        order = await self.white_topup_orders.create(
                             session,
-                            user=user,
-                            expires_at=expires_at if subscription_is_active(subscription) else None,
+                            telegram_user_id=user.telegram_user_id,
+                            order_uuid=donation_order_uuid,
+                            granted_bytes=gigabytes * BYTES_PER_GB,
+                            amount_minor=event.amount_minor or 0,
+                            currency=event.currency or "rub",
+                            title=f"{self.settings.bot_public_name} White {gigabytes} GB",
+                            status=event.event_name,
+                            payment_url=None,
+                            webapp_payment_url=None,
+                            payload_json=self.tribute.dump_payload(payload),
                         )
+                    order.status = event.event_name
+                    order.payload_json = self.tribute.dump_payload(payload)
+                    if order.paid_at is None:
+                        order.paid_at = datetime.now(UTC)
+                    subscription = await self.subscriptions.get_subscription(session, user.telegram_user_id)
+                    expires_at = ensure_utc(subscription.expires_at) if subscription else None
+                    await self._sync_white_state(
+                        session,
+                        user=user,
+                        expires_at=expires_at if subscription_is_active(subscription) else None,
+                    )
 
             await self.webhook_events.store(
                 session,
@@ -651,6 +650,55 @@ class AccessService:
             )
 
         return event
+
+    async def admin_grant_white_traffic(
+        self,
+        *,
+        lookup: str,
+        gigabytes: int,
+        granted_by_admin: int,
+    ) -> AccessBundle | None:
+        normalized = _normalize_admin_lookup(lookup)
+        if not normalized or gigabytes <= 0:
+            return None
+
+        async with session_scope(self.session_factory) as session:
+            user = await self._resolve_user_lookup(session, normalized)
+            if user is None:
+                return None
+
+            order = await self.white_topup_orders.create(
+                session,
+                telegram_user_id=user.telegram_user_id,
+                order_uuid=f"admin:{uuid4().hex}",
+                granted_bytes=gigabytes * BYTES_PER_GB,
+                amount_minor=0,
+                currency="rub",
+                title=f"{self.settings.bot_public_name} White {gigabytes} GB",
+                status="admin_manual",
+                payment_url=None,
+                webapp_payment_url=None,
+                payload_json=json.dumps(
+                    {
+                        "granted_by_admin": granted_by_admin,
+                        "gigabytes": gigabytes,
+                        "source": "admin_manual",
+                    },
+                    ensure_ascii=False,
+                    sort_keys=True,
+                ),
+            )
+            order.paid_at = datetime.now(UTC)
+
+            subscription = await self.subscriptions.get_subscription(session, user.telegram_user_id)
+            vpn_account = await self.vpn_accounts.get_account(session, user.telegram_user_id)
+            expires_at = ensure_utc(subscription.expires_at) if subscription else None
+            await self._sync_white_state(
+                session,
+                user=user,
+                expires_at=expires_at if subscription_is_active(subscription) else None,
+            )
+            return AccessBundle(**user_view_model(user, subscription, vpn_account))
 
     async def admin_get_stats(self) -> DashboardStats:
         async with session_scope(self.session_factory) as session:

@@ -161,26 +161,23 @@ def format_white_traffic_gb(remaining_bytes: int | None, *, is_unlimited: bool =
     return f"~{gigabytes:.2f}".replace(".", ",") + " гигабайт"
 
 
-def white_internet_text(*, white_traffic_remaining: str) -> str:
+def white_internet_text(*, white_traffic_remaining: str, is_unlimited: bool = False) -> str:
+    if is_unlimited:
+        return (
+            "<b>Белый интернет</b>\n\n"
+            f"Сейчас доступно: <b>{white_traffic_remaining}</b>\n\n"
+            "Для этого аккаунта белый интернет включён безлимитно.\n\n"
+            "Тут будет отдельное объяснение, кому и когда нужен этот режим."
+        )
     return (
         "<b>Белый интернет</b>\n\n"
         f"Сейчас доступно: <b>{white_traffic_remaining}</b>\n\n"
         "Тут будет отдельное объяснение, кому и когда нужен этот режим.\n\n"
         "<b>Пакеты трафика:</b>\n"
-        "50 GB\n"
-        "100 GB\n"
-        "250 GB\n\n"
-        "Выбери пакет ниже, и бот создаст отдельную оплату через Tribute."
-    )
-
-
-def white_checkout_text(*, white_traffic_remaining: str, gigabytes: int, amount_rub: int) -> str:
-    return (
-        "<b>Белый интернет</b>\n\n"
-        f"Сейчас доступно: <b>{white_traffic_remaining}</b>\n\n"
-        f"Подготовил оплату пакета <b>{gigabytes} GB</b>.\n"
-        f"Сумма: <b>{amount_rub} ₽</b>\n\n"
-        "Нажми кнопку ниже, чтобы перейти в Tribute и оплатить этот пакет."
+        "50 GB — 110 ₽\n"
+        "100 GB — 220 ₽\n"
+        "250 GB — 550 ₽\n\n"
+        "Выбери пакет ниже, откроется Tribute, а после доната гигабайты зачислятся автоматически."
     )
 
 
