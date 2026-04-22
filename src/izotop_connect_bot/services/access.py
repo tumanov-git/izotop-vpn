@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 from dataclasses import dataclass
+from decimal import Decimal
 from datetime import UTC, datetime, timedelta
 from typing import Any
 from uuid import uuid4
@@ -102,7 +103,7 @@ class AccessService:
     def _is_white_unlimited(self, telegram_user_id: int) -> bool:
         return telegram_user_id in self.settings.white_unlimited_user_ids
 
-    def _resolve_white_topup_gigabytes(
+    def _resolve_white_topup_granted_bytes(
         self,
         *,
         amount_minor: int | None,
@@ -113,13 +114,16 @@ class AccessService:
         currency_value = (currency or "rub").strip().casefold()
         if currency_value not in {"rub", "rur"}:
             return None
-        amount_rub = amount_minor // 100
-        price_map = {
-            self.settings.white_price_50gb_rub: 50,
-            self.settings.white_price_100gb_rub: 100,
-            self.settings.white_price_250gb_rub: 250,
-        }
-        return price_map.get(amount_rub) if amount_rub * 100 == amount_minor else None
+        if self.settings.white_price_per_gb_rub <= 0:
+            return None
+        granted_bytes = amount_minor * BYTES_PER_GB // (self.settings.white_price_per_gb_rub * 100)
+        return granted_bytes if granted_bytes > 0 else None
+
+    def _format_white_topup_gigabytes(self, granted_bytes: int) -> str:
+        gigabytes = Decimal(granted_bytes) / Decimal(BYTES_PER_GB)
+        normalized = gigabytes.normalize()
+        text = format(normalized, "f").rstrip("0").rstrip(".")
+        return text or "0"
 
     @staticmethod
     def _white_donation_order_uuid(event: TributeEvent) -> str:
@@ -599,11 +603,11 @@ class AccessService:
                 )
 
             if event.event_name == "new_donation" and event.telegram_user_id is not None:
-                gigabytes = self._resolve_white_topup_gigabytes(
+                granted_bytes = self._resolve_white_topup_granted_bytes(
                     amount_minor=event.amount_minor,
                     currency=event.currency,
                 )
-                if gigabytes is not None:
+                if granted_bytes is not None:
                     user = await self.users.upsert_user(
                         session,
                         telegram_user_id=event.telegram_user_id,
@@ -621,10 +625,13 @@ class AccessService:
                             session,
                             telegram_user_id=user.telegram_user_id,
                             order_uuid=donation_order_uuid,
-                            granted_bytes=gigabytes * BYTES_PER_GB,
+                            granted_bytes=granted_bytes,
                             amount_minor=event.amount_minor or 0,
                             currency=event.currency or "rub",
-                            title=f"{self.settings.bot_public_name} White {gigabytes} GB",
+                            title=(
+                                f"{self.settings.bot_public_name} White "
+                                f"{self._format_white_topup_gigabytes(granted_bytes)} GB"
+                            ),
                             status=event.event_name,
                             payment_url=None,
                             webapp_payment_url=None,

@@ -43,6 +43,7 @@ class Settings(BaseSettings):
     remnawave_ssl_ignore: bool = Field(default=False, alias="REMNAWAVE_SSL_IGNORE")
     white_monthly_free_gb: int = Field(default=5, alias="WHITE_MONTHLY_FREE_GB")
     white_unlimited_user_ids: tuple[int, ...] = Field(default_factory=tuple, alias="WHITE_UNLIMITED_USER_IDS")
+    white_price_per_gb_rub: int = Field(default=2, alias="WHITE_PRICE_PER_GB_RUB")
     white_price_50gb_rub: int = Field(default=110, alias="WHITE_PRICE_50GB_RUB")
     white_price_100gb_rub: int = Field(default=220, alias="WHITE_PRICE_100GB_RUB")
     white_price_250gb_rub: int = Field(default=550, alias="WHITE_PRICE_250GB_RUB")

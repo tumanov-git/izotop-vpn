@@ -69,19 +69,10 @@ def home_keyboard(
 def white_internet_keyboard(
     *,
     url_50gb: str | None,
-    url_100gb: str | None,
-    url_250gb: str | None,
 ) -> InlineKeyboardMarkup:
     rows: list[list[InlineKeyboardButton]] = []
-    first_row: list[InlineKeyboardButton] = []
     if url_50gb:
-        first_row.append(InlineKeyboardButton(text="50 GB · 110 ₽", url=url_50gb, style=ButtonStyle.PRIMARY))
-    if url_100gb:
-        first_row.append(InlineKeyboardButton(text="100 GB · 220 ₽", url=url_100gb, style=ButtonStyle.PRIMARY))
-    if first_row:
-        rows.append(first_row)
-    if url_250gb:
-        rows.append([InlineKeyboardButton(text="250 GB · 550 ₽", url=url_250gb, style=ButtonStyle.PRIMARY)])
+        rows.append([InlineKeyboardButton(text="Пополнить white-трафик", url=url_50gb, style=ButtonStyle.PRIMARY)])
     rows.append(
         [
             InlineKeyboardButton(

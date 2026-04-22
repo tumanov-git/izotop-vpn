@@ -171,8 +171,6 @@ async def _render_white_internet_screen(
         ),
         reply_markup=white_internet_keyboard(
             url_50gb=None if is_unlimited else settings.white_donation_50gb_url,
-            url_100gb=None if is_unlimited else settings.white_donation_100gb_url,
-            url_250gb=None if is_unlimited else settings.white_donation_250gb_url,
         ),
     )
 
