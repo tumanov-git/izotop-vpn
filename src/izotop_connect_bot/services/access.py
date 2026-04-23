@@ -142,9 +142,12 @@ class AccessService:
     def _build_white_topup_notification_text(
         self,
         *,
+        amount_minor: int,
         granted_bytes: int,
         white_access: WhiteAccessState,
     ) -> str:
+        amount_rub = Decimal(amount_minor) / Decimal(100)
+        amount_text = format(amount_rub.normalize(), "f").rstrip("0").rstrip(".") or "0"
         granted_gb = self._format_white_topup_gigabytes(granted_bytes)
         total_remaining_bytes = (
             white_access.current_free_remaining_bytes + white_access.purchased_remaining_bytes
@@ -154,8 +157,8 @@ class AccessService:
             is_unlimited=white_access.is_unlimited,
         )
         return (
-            "Платёж получен.\n\n"
-            f"Начислил <b>{granted_gb} GB</b> белого трафика.\n"
+            f"Платеж получен: <b>{amount_text} ₽</b>.\n\n"
+            f"Начислено <b>{granted_gb} GB</b> белого трафика.\n"
             f"Сейчас доступно: <b>{total_remaining}</b>"
         )
 
@@ -686,6 +689,7 @@ class AccessService:
                     )
                     result.notification_telegram_user_id = user.telegram_user_id
                     result.notification_text = self._build_white_topup_notification_text(
+                        amount_minor=event.amount_minor or 0,
                         granted_bytes=granted_bytes,
                         white_access=white_access,
                     )

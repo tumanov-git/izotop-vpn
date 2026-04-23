@@ -49,6 +49,7 @@ from izotop_connect_bot.bot.texts import (
     paginated_admin_users_list_text,
     welcome_text,
     white_internet_text,
+    white_keys_text,
 )
 from izotop_connect_bot.config import Settings
 from izotop_connect_bot.links import build_happ_link
@@ -80,6 +81,9 @@ STATUS_PICTURES: dict[SubscriptionState, Path] = {
     "active": PICS_DIR / "sub_active.png",
     "inactive": PICS_DIR / "sub_inactive.png",
 }
+WHITE_INTERNET_PICTURE = PICS_DIR / "white_internet.png"
+
+
 def _display_name(message: Message) -> str:
     return message.from_user.first_name if message.from_user else "друг"
 
@@ -99,6 +103,10 @@ def _subscription_state(access: AccessBundle) -> SubscriptionState:
 
 def _picture_file(state: SubscriptionState) -> FSInputFile:
     return FSInputFile(str(STATUS_PICTURES[state]))
+
+
+def _custom_picture_file(picture_path: Path) -> FSInputFile:
+    return FSInputFile(str(picture_path))
 
 
 def _access_url(settings: Settings, subscription_url: str) -> str:
@@ -172,6 +180,8 @@ async def _render_white_internet_screen(
         reply_markup=white_internet_keyboard(
             url_50gb=None if is_unlimited else settings.white_donation_50gb_url,
         ),
+        refresh_media=True,
+        picture_path=WHITE_INTERNET_PICTURE,
     )
 
 
@@ -214,12 +224,13 @@ async def _safe_edit_media(
     state: SubscriptionState,
     caption: str,
     *,
+    picture_path: Path | None = None,
     reply_markup=None,
 ) -> None:
     try:
         await message.edit_media(
             media=InputMediaPhoto(
-                media=_picture_file(state),
+                media=_custom_picture_file(picture_path) if picture_path else _picture_file(state),
                 caption=caption,
                 parse_mode=ParseMode.HTML,
             ),
@@ -315,6 +326,7 @@ async def _render_user_screen(
     *,
     reply_markup=None,
     refresh_media: bool = False,
+    picture_path: Path | None = None,
 ) -> None:
     state = _subscription_state(access)
     if message.photo:
@@ -323,6 +335,7 @@ async def _render_user_screen(
                 message,
                 state,
                 caption,
+                picture_path=picture_path,
                 reply_markup=reply_markup,
             )
         else:
@@ -333,7 +346,7 @@ async def _render_user_screen(
             )
         return
     await message.answer_photo(
-        _picture_file(state),
+        _custom_picture_file(picture_path) if picture_path else _picture_file(state),
         caption=caption,
         parse_mode=ParseMode.HTML,
         reply_markup=reply_markup,
@@ -528,8 +541,10 @@ def create_router(access_service: AccessService, settings: Settings) -> Router:
         await _render_user_screen(
             callback.message,
             access,
-            "Выбери устройство. Мы дадим короткую инструкцию и белый доступ.",
-            reply_markup=device_keyboard(prefix="whiteaccess"),
+            "Выбери устройство. Мы дадим короткую инструкцию и ссылку именно на белый интернет.",
+            reply_markup=device_keyboard(prefix="whiteaccess", back_callback="home:white"),
+            refresh_media=True,
+            picture_path=WHITE_INTERNET_PICTURE,
         )
         await callback.answer()
 
@@ -565,11 +580,12 @@ def create_router(access_service: AccessService, settings: Settings) -> Router:
             callback.message,
             access,
             f"<b>{guide['title']}</b>\n\n{guide['body']}\n\n"
-            f"{keys_text(expires_at=access.expires_at, subscription_url=white_vpn_account.subscription_url)}",
+            f"{white_keys_text(expires_at=access.expires_at, subscription_url=white_vpn_account.subscription_url)}",
             reply_markup=white_access_result_keyboard(
                 _access_url(settings, white_vpn_account.subscription_url)
             ),
             refresh_media=True,
+            picture_path=WHITE_INTERNET_PICTURE,
         )
         await callback.answer("Белый доступ готов")
 

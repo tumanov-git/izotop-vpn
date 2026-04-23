@@ -85,8 +85,7 @@ def white_internet_keyboard(
     rows.append([InlineKeyboardButton(text="Назад", callback_data="home:root")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
-
-def device_keyboard(*, prefix: str) -> InlineKeyboardMarkup:
+def device_keyboard(*, prefix: str, back_callback: str = "home:root") -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
             [
@@ -98,7 +97,7 @@ def device_keyboard(*, prefix: str) -> InlineKeyboardMarkup:
                 InlineKeyboardButton(text="macOS", callback_data=f"{prefix}:macos"),
             ],
             [InlineKeyboardButton(text="Smart TV", callback_data=f"{prefix}:smart_tv")],
-            [InlineKeyboardButton(text="Назад", callback_data="home:root")],
+            [InlineKeyboardButton(text="Назад", callback_data=back_callback)],
         ]
     )
 

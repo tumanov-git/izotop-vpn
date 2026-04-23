@@ -162,18 +162,17 @@ def format_white_traffic_gb(remaining_bytes: int | None, *, is_unlimited: bool =
 
 
 def white_internet_text(*, white_traffic_remaining: str, is_unlimited: bool = False) -> str:
-    if is_unlimited:
-        return (
-            "<b>Белый интернет</b>\n\n"
-            f"Сейчас доступно: <b>{white_traffic_remaining}</b>\n\n"
-            "Для этого аккаунта белый интернет включён безлимитно.\n\n"
-            "Тут будет отдельное объяснение, кому и когда нужен этот режим."
-        )
     return (
         "<b>Белый интернет</b>\n\n"
         f"Сейчас доступно: <b>{white_traffic_remaining}</b>\n\n"
-        "Тут будет отдельное объяснение, кому и когда нужен этот режим.\n\n"
-        "<b>Пополнение:</b> 1 гигабайт = 2 ₽.\n"
+        "Белый интернет — это когда на мобильном интернете можно ходить только на определенные сайты. "
+        "Есть некий \"белый список\". Все, что в него не входит, запрещено.\n\n"
+        "Работают: ВК, Госуслуги, Яндекс, МАХ.\n"
+        "Не работают: Сбер, Т-банк, все остальные русские сайты в интернете.\n\n"
+        "Пополнение: 1 гигабайт = 2 ₽.\n"
+        "50гб — 100р\n"
+        "100гб — 200р\n"
+        "250гб — 500р\n"
         "Можно отправить любую сумму в Tribute, а трафик зачислится автоматически по этой формуле."
     )
 
@@ -184,6 +183,16 @@ def keys_text(*, expires_at: datetime | None, subscription_url: str) -> str:
         f"<b>Активен до:</b> {format_expiry(expires_at)}\n"
         f"<b>Subscription URL:</b>\n<code>{subscription_url}</code>\n\n"
         "Используй кнопку ниже или QR-код, чтобы импортировать подписку в клиент."
+    )
+
+
+def white_keys_text(*, expires_at: datetime | None, subscription_url: str) -> str:
+    return (
+        "<b>Белый интернет</b>\n\n"
+        "Это ссылка именно на белый интернет.\n\n"
+        f"<b>Активен до:</b> {format_expiry(expires_at)}\n"
+        f"<b>Subscription URL для белого интернета:</b>\n<code>{subscription_url}</code>\n\n"
+        "Используй кнопку ниже, чтобы импортировать эту подписку в клиент."
     )
 
 
