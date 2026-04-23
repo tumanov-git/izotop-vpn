@@ -34,6 +34,7 @@ class TributeEvent:
     telegram_user_id: int | None
     telegram_username: str | None
     tribute_subscription_id: int | None
+    subscription_name: str | None
     period_id: int | None
     channel_id: int | None
     expires_at: datetime | None
@@ -97,6 +98,7 @@ class TributeService:
             telegram_user_id=int(telegram_user_id) if telegram_user_id is not None else None,
             telegram_username=data.get("telegram_username"),
             tribute_subscription_id=int(subscription_id) if subscription_id is not None else None,
+            subscription_name=data.get("subscription_name"),
             period_id=int(data["period_id"]) if data.get("period_id") is not None else None,
             channel_id=int(data["channel_id"]) if data.get("channel_id") is not None else None,
             expires_at=expires_at,

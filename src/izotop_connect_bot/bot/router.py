@@ -17,6 +17,7 @@ from aiogram.types import BufferedInputFile, CallbackQuery, FSInputFile, InputMe
 
 from izotop_connect_bot.bot.keyboards import (
     access_result_keyboard,
+    add_devices_keyboard,
     admin_broadcast_confirm_keyboard,
     admin_broadcast_menu_keyboard,
     admin_cancel_keyboard,
@@ -37,6 +38,7 @@ from izotop_connect_bot.bot.texts import (
     DEVICE_GUIDES,
     FAQ_ITEMS,
     SubscriptionState,
+    add_devices_text,
     admin_broadcast_confirm_text,
     admin_broadcast_menu_text,
     admin_user_card_text,
@@ -82,6 +84,7 @@ STATUS_PICTURES: dict[SubscriptionState, Path] = {
     "inactive": PICS_DIR / "sub_inactive.png",
 }
 WHITE_INTERNET_PICTURE = PICS_DIR / "white_internet.png"
+ADD_ACCOUNT_PICTURE = PICS_DIR / "add_account.png"
 
 
 def _display_name(message: Message) -> str:
@@ -142,7 +145,7 @@ async def _render_home_dashboard(
             name,
             state=_subscription_state(access),
             expires_at=access.expires_at,
-            device_limit=access.user.device_limit if access.user and access.is_active else None,
+            device_limit=access.effective_device_limit if access.user and access.is_active else None,
             white_traffic_remaining=white_traffic_remaining,
         ),
         reply_markup=home_keyboard(
@@ -151,6 +154,7 @@ async def _render_home_dashboard(
             buy_url=settings.bot_buy_url,
             support_url=settings.bot_support_url,
             show_white_internet=_show_white_internet_button(access, white_access),
+            show_add_devices=access.is_active,
         ),
         refresh_media=refresh_media,
     )
@@ -268,6 +272,8 @@ def _broadcast_audience_label(*, target: str, promo_code: str | None) -> str:
     if target == "promo" and promo_code:
         preview = promo_code[:10] + "..." if len(promo_code) > 10 else promo_code
         return f"Промокод: <code>{escape(preview)}</code>"
+    if target == "active":
+        return "Только активные подписки"
     return "Все пользователи"
 
 
@@ -387,7 +393,9 @@ def _admin_user_text(access: AccessBundle) -> str:
         is_active=access.is_active,
         expires_at=access.expires_at,
         has_vpn=access.vpn_account is not None,
-        device_limit=access.user.device_limit,
+        device_limit=access.effective_device_limit or access.user.device_limit,
+        device_addon_bonus=access.device_addon_bonus,
+        base_device_limit=access.base_device_limit,
         source=access.subscription.source if access.subscription else None,
         remnawave_username=access.vpn_account.remnawave_username if access.vpn_account else None,
     )
@@ -525,6 +533,35 @@ def create_router(access_service: AccessService, settings: Settings) -> Router:
             callback.from_user.id,
         )
         await callback.answer()
+
+    @router.callback_query(F.data == "home:add_devices")
+    async def on_add_devices(callback: CallbackQuery) -> None:
+        if not callback.from_user or not callback.message:
+            return
+        access = await access_service.get_access_bundle(callback.from_user.id)
+        if not access.is_active:
+            await callback.answer("Добавление устройств доступно только при активной подписке", show_alert=True)
+            return
+        await _render_user_screen(
+            callback.message,
+            access,
+            add_devices_text(),
+            reply_markup=add_devices_keyboard(
+                url_3=settings.device_addon_3_url,
+                url_6=settings.device_addon_6_url,
+                url_9=settings.device_addon_9_url,
+            ),
+            refresh_media=True,
+            picture_path=ADD_ACCOUNT_PICTURE,
+        )
+        await callback.answer()
+
+    @router.callback_query(F.data.startswith("devices_addon:"))
+    async def on_add_devices_unavailable(callback: CallbackQuery) -> None:
+        if not callback.message:
+            return
+        _, raw_bonus = callback.data.split(":", 1)
+        await callback.answer(f"Тариф +{raw_bonus} пока не настроен", show_alert=True)
 
     @router.callback_query(F.data == "white:access")
     async def on_white_access(callback: CallbackQuery) -> None:
@@ -792,6 +829,28 @@ def create_router(access_service: AccessService, settings: Settings) -> Router:
         )
         await callback.answer()
 
+    @router.callback_query(F.data == "admin:broadcast:active")
+    async def on_admin_broadcast_active(callback: CallbackQuery, state: FSMContext) -> None:
+        if not _is_admin(callback, settings) or not callback.message:
+            await callback.answer("Нет доступа", show_alert=True)
+            return
+        recipients_count = await access_service.admin_count_users(active_only=True)
+        await state.clear()
+        await state.update_data(
+            broadcast_target="active",
+            broadcast_promo_code=None,
+            broadcast_recipients_count=recipients_count,
+        )
+        await state.set_state(AdminStates.waiting_for_broadcast_text)
+        await _render_admin_screen(
+            callback.message,
+            "Пришли текст рассылки одним сообщением.\n\n"
+            f"Сейчас в выборке: <b>{recipients_count}</b> активных подписок.\n"
+            "Сообщение уйдёт как обычный текст без HTML-разметки.",
+            reply_markup=admin_cancel_keyboard("admin:broadcast_menu"),
+        )
+        await callback.answer()
+
     @router.callback_query(F.data == "admin:broadcast:promo")
     async def on_admin_broadcast_promo(callback: CallbackQuery, state: FSMContext) -> None:
         if not _is_admin(callback, settings) or not callback.message:
@@ -1042,7 +1101,7 @@ def create_router(access_service: AccessService, settings: Settings) -> Router:
             await message.answer("Пользователь не найден.")
             return
         await message.answer(
-            f"Лимит устройств обновлён до <b>{device_limit}</b>.\n\n{_admin_user_text(access)}",
+            f"Базовый лимит устройств обновлён до <b>{device_limit}</b>.\n\n{_admin_user_text(access)}",
             reply_markup=admin_user_keyboard(
                 access.user.telegram_user_id,
                 has_access=access.vpn_account is not None,
@@ -1159,7 +1218,8 @@ def create_router(access_service: AccessService, settings: Settings) -> Router:
         target = data.get("broadcast_target", "all")
         promo_code = data.get("broadcast_promo_code")
         recipient_ids = await access_service.admin_list_broadcast_user_ids(
-            code=promo_code if target == "promo" else None
+            code=promo_code if target == "promo" else None,
+            active_only=target == "active",
         )
         recipient_ids = list(dict.fromkeys(recipient_ids))
         if not recipient_ids:
@@ -1276,7 +1336,9 @@ def create_router(access_service: AccessService, settings: Settings) -> Router:
                 is_active=access.is_active,
                 expires_at=access.expires_at,
                 has_vpn=access.vpn_account is not None,
-                device_limit=access.user.device_limit if access.user else settings.remnawave_default_device_limit,
+                device_limit=access.effective_device_limit or settings.remnawave_default_device_limit,
+                device_addon_bonus=access.device_addon_bonus,
+                base_device_limit=access.base_device_limit,
                 source=access.subscription.source if access.subscription else None,
                 remnawave_username=access.vpn_account.remnawave_username if access.vpn_account else None,
             ),

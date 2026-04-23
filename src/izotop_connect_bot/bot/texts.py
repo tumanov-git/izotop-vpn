@@ -166,14 +166,22 @@ def white_internet_text(*, white_traffic_remaining: str, is_unlimited: bool = Fa
         "<b>Белый интернет</b>\n\n"
         f"Сейчас доступно: <b>{white_traffic_remaining}</b>\n\n"
         "Белый интернет — это когда на мобильном интернете можно ходить только на определенные сайты. "
-        "Есть некий \"белый список\". Все, что в него не входит, запрещено.\n\n"
-        "Работают: ВК, Госуслуги, Яндекс, МАХ.\n"
-        "Не работают: Сбер, Т-банк, все остальные русские сайты в интернете.\n\n"
+        "Есть некий \"белый список\". Все, что в него не входит, запрещено. "
+        "Наш Izotop Connect решает эту проблем. 5 гб/месяц бесплатно.\n\n"
         "Пополнение: 1 гигабайт = 2 ₽.\n"
         "50гб — 100р\n"
         "100гб — 200р\n"
         "250гб — 500р\n"
-        "Можно отправить любую сумму в Tribute, а трафик зачислится автоматически по этой формуле."
+        "Можно отправить любую сумму в Tribute, а трафик зачислится автоматически по этой формуле. "
+        "ГБ не сгорают и переносятся на следующий месяц."
+    )
+
+
+def add_devices_text() -> str:
+    return (
+        "<b>Добавить устройства</b>\n\n"
+        "Здесь вы можете добавить <b>+3</b>, <b>+6</b> и <b>+9</b> устройств.\n"
+        "Выберите, сколько добавить."
     )
 
 
@@ -227,6 +235,8 @@ def admin_user_card_text(
     expires_at: datetime | None,
     has_vpn: bool,
     device_limit: int,
+    device_addon_bonus: int = 0,
+    base_device_limit: int | None = None,
     source: str | None,
     remnawave_username: str | None = None,
 ) -> str:
@@ -243,6 +253,8 @@ def admin_user_card_text(
         f"<b>Лимит устройств:</b> {device_limit}",
         f"<b>VPN-аккаунт:</b> {vpn_state}",
     ]
+    if device_addon_bonus > 0 and base_device_limit is not None:
+        lines.append(f"<b>База / бонус:</b> {base_device_limit} + {device_addon_bonus}")
     if source:
         lines.append(f"<b>Источник:</b> {source}")
     if remnawave_username:
@@ -308,7 +320,7 @@ def admin_broadcast_menu_text() -> str:
     return (
         "<b>Рассылка</b>\n\n"
         "Выбери аудиторию.\n"
-        "Можно отправить сообщение всем пользователям или только тем, кто активировал конкретный промокод."
+        "Можно отправить сообщение всем пользователям, только активным подпискам или тем, кто активировал конкретный промокод."
     )
 
 

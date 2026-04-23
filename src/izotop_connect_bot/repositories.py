@@ -8,6 +8,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from izotop_connect_bot.models import (
+    DeviceAddonSubscription,
     ManualImport,
     PromoCode,
     PromoCodeRedemption,
@@ -51,6 +52,7 @@ class AdminUserRow:
     telegram_username: str | None
     first_name: str | None
     device_limit: int
+    device_addon_bonus: int
     is_active: bool
     expires_at: datetime | None
     has_vpn: bool
@@ -183,13 +185,21 @@ class UserRepository:
             vpn_account = await session.scalar(
                 select(VpnAccount).where(VpnAccount.telegram_user_id == user.telegram_user_id)
             )
+            device_addon_bonus = await session.scalar(
+                select(func.coalesce(func.sum(DeviceAddonSubscription.bonus_devices), 0)).where(
+                    DeviceAddonSubscription.telegram_user_id == user.telegram_user_id,
+                    DeviceAddonSubscription.expires_at.is_not(None),
+                    DeviceAddonSubscription.expires_at > utcnow(),
+                )
+            ) or 0
             is_active = subscription_is_active(subscription)
             rows.append(
                 AdminUserRow(
                     telegram_user_id=user.telegram_user_id,
                     telegram_username=user.telegram_username,
                     first_name=user.first_name,
-                    device_limit=user.device_limit,
+                    device_limit=user.device_limit + int(device_addon_bonus),
+                    device_addon_bonus=int(device_addon_bonus),
                     is_active=is_active,
                     expires_at=ensure_utc(subscription.expires_at) if subscription else None,
                     has_vpn=vpn_account is not None,
@@ -486,6 +496,84 @@ class WhiteTopUpOrderRepository:
 
     async def delete_for_user(self, session: AsyncSession, telegram_user_id: int) -> int:
         query = select(WhiteTopUpOrder).where(WhiteTopUpOrder.telegram_user_id == telegram_user_id)
+        rows = (await session.execute(query)).scalars().all()
+        for row in rows:
+            await session.delete(row)
+        return len(rows)
+
+
+class DeviceAddonSubscriptionRepository:
+    async def get_by_tribute_subscription_id(
+        self,
+        session: AsyncSession,
+        tribute_subscription_id: int,
+    ) -> DeviceAddonSubscription | None:
+        query = select(DeviceAddonSubscription).where(
+            DeviceAddonSubscription.tribute_subscription_id == tribute_subscription_id
+        )
+        return (await session.execute(query)).scalar_one_or_none()
+
+    async def upsert_subscription(
+        self,
+        session: AsyncSession,
+        *,
+        telegram_user_id: int,
+        tribute_subscription_id: int,
+        subscription_name: str,
+        period_id: int | None,
+        channel_id: int | None,
+        bonus_devices: int,
+        status: str,
+        expires_at: datetime | None,
+        cancelled: bool,
+        source: str = "tribute",
+    ) -> DeviceAddonSubscription:
+        subscription = await self.get_by_tribute_subscription_id(session, tribute_subscription_id)
+        if subscription is None:
+            subscription = DeviceAddonSubscription(
+                telegram_user_id=telegram_user_id,
+                tribute_subscription_id=tribute_subscription_id,
+                subscription_name=subscription_name,
+                period_id=period_id,
+                channel_id=channel_id,
+                bonus_devices=bonus_devices,
+                status=status,
+                expires_at=ensure_utc(expires_at),
+                cancelled=cancelled,
+                source=source,
+            )
+            session.add(subscription)
+        else:
+            subscription.telegram_user_id = telegram_user_id
+            subscription.subscription_name = subscription_name
+            subscription.period_id = period_id
+            subscription.channel_id = channel_id
+            subscription.bonus_devices = bonus_devices
+            subscription.status = status
+            subscription.expires_at = ensure_utc(expires_at)
+            subscription.cancelled = cancelled
+            subscription.source = source
+        return subscription
+
+    async def sum_active_bonus(
+        self,
+        session: AsyncSession,
+        telegram_user_id: int,
+        *,
+        at: datetime | None = None,
+    ) -> int:
+        point = ensure_utc(at) or utcnow()
+        query = select(func.coalesce(func.sum(DeviceAddonSubscription.bonus_devices), 0)).where(
+            DeviceAddonSubscription.telegram_user_id == telegram_user_id,
+            DeviceAddonSubscription.expires_at.is_not(None),
+            DeviceAddonSubscription.expires_at > point,
+        )
+        return int(await session.scalar(query) or 0)
+
+    async def delete_for_user(self, session: AsyncSession, telegram_user_id: int) -> int:
+        query = select(DeviceAddonSubscription).where(
+            DeviceAddonSubscription.telegram_user_id == telegram_user_id
+        )
         rows = (await session.execute(query)).scalars().all()
         for row in rows:
             await session.delete(row)

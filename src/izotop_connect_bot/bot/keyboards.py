@@ -13,6 +13,7 @@ def home_keyboard(
     buy_url: str,
     support_url: str,
     show_white_internet: bool = False,
+    show_add_devices: bool = False,
 ) -> InlineKeyboardMarkup:
     rows = []
     if state == "active":
@@ -35,6 +36,8 @@ def home_keyboard(
                     )
                 ]
             )
+        if show_add_devices:
+            rows.append([InlineKeyboardButton(text="Добавить устройства", callback_data="home:add_devices")])
     else:
         rows.append(
             [
@@ -80,6 +83,47 @@ def white_internet_keyboard(
                 callback_data="white:access",
                 style=ButtonStyle.SUCCESS,
             )
+        ]
+    )
+    rows.append([InlineKeyboardButton(text="Назад", callback_data="home:root")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def add_devices_keyboard(
+    *,
+    url_3: str | None,
+    url_6: str | None,
+    url_9: str | None,
+) -> InlineKeyboardMarkup:
+    rows: list[list[InlineKeyboardButton]] = []
+    rows.append(
+        [
+            InlineKeyboardButton(
+                text="+3",
+                url=url_3,
+            )
+            if url_3
+            else InlineKeyboardButton(text="+3", callback_data="devices_addon:3")
+        ]
+    )
+    rows.append(
+        [
+            InlineKeyboardButton(
+                text="+6",
+                url=url_6,
+            )
+            if url_6
+            else InlineKeyboardButton(text="+6", callback_data="devices_addon:6")
+        ]
+    )
+    rows.append(
+        [
+            InlineKeyboardButton(
+                text="+9",
+                url=url_9,
+            )
+            if url_9
+            else InlineKeyboardButton(text="+9", callback_data="devices_addon:9")
         ]
     )
     rows.append([InlineKeyboardButton(text="Назад", callback_data="home:root")])
@@ -293,6 +337,12 @@ def admin_broadcast_menu_keyboard() -> InlineKeyboardMarkup:
                     text="Всем пользователям",
                     callback_data="admin:broadcast:all",
                     style=ButtonStyle.PRIMARY,
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    text="Только активным",
+                    callback_data="admin:broadcast:active",
                 )
             ],
             [

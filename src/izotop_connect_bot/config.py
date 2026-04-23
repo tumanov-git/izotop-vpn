@@ -59,6 +59,18 @@ class Settings(BaseSettings):
         default="https://t.me/tribute/app?startapp=dJ8J",
         alias="WHITE_DONATION_250GB_URL",
     )
+    device_addon_3_url: str | None = Field(
+        default="https://t.me/tribute/app?startapp=sTto",
+        alias="DEVICE_ADDON_3_URL",
+    )
+    device_addon_6_url: str | None = Field(
+        default="https://t.me/tribute/app?startapp=sTtp",
+        alias="DEVICE_ADDON_6_URL",
+    )
+    device_addon_9_url: str | None = Field(
+        default="https://t.me/tribute/app?startapp=sTtu",
+        alias="DEVICE_ADDON_9_URL",
+    )
 
     database_url: str = Field(
         default="sqlite+aiosqlite:///./data/izotop_connect.db", alias="DATABASE_URL"

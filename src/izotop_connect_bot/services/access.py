@@ -16,6 +16,7 @@ from izotop_connect_bot.db import session_scope
 from izotop_connect_bot.repositories import (
     AdminUserRow,
     DashboardStats,
+    DeviceAddonSubscriptionRepository,
     ManualImportRepository,
     PromoCodeRedemptionRepository,
     PromoCodeRepository,
@@ -43,6 +44,9 @@ class AccessBundle:
     vpn_account: Any
     is_active: bool
     expires_at: datetime | None
+    base_device_limit: int | None = None
+    device_addon_bonus: int = 0
+    effective_device_limit: int | None = None
 
 
 @dataclass(slots=True)
@@ -71,6 +75,11 @@ def normalize_promo_code(code: str) -> str:
 
 PROMO_DEVICE_LIMIT = 1
 BYTES_PER_GB = 1024**3
+DEVICE_ADDON_SUBSCRIPTION_BONUSES = {
+    "+3 устройства на Izotop Connect": 3,
+    "+6 устройств на Izotop Connect": 6,
+    "+9 устройств на Izotop Connect": 9,
+}
 
 
 def _normalize_admin_lookup(value: str) -> str:
@@ -96,6 +105,7 @@ class AccessService:
         self.white_vpn_accounts = WhiteVpnAccountRepository()
         self.white_traffic_cycles = WhiteTrafficCycleRepository()
         self.white_topup_orders = WhiteTopUpOrderRepository()
+        self.device_addon_subscriptions = DeviceAddonSubscriptionRepository()
         self.webhook_events = WebhookEventRepository()
         self.manual_imports = ManualImportRepository()
         self.promo_codes = PromoCodeRepository()
@@ -107,6 +117,46 @@ class AccessService:
 
     def _white_feature_enabled(self) -> bool:
         return bool(self.settings.remnawave_white_internal_squad_uuid)
+
+    def _resolve_device_addon_bonus(self, subscription_name: str | None) -> int | None:
+        if not subscription_name:
+            return None
+        return DEVICE_ADDON_SUBSCRIPTION_BONUSES.get(subscription_name.strip())
+
+    async def _calculate_device_limits(
+        self,
+        session: AsyncSession,
+        *,
+        user: Any | None,
+    ) -> tuple[int | None, int, int | None]:
+        if user is None:
+            return None, 0, None
+        base_device_limit = max(1, int(user.device_limit or self.settings.remnawave_default_device_limit))
+        device_addon_bonus = await self.device_addon_subscriptions.sum_active_bonus(
+            session,
+            user.telegram_user_id,
+        )
+        return base_device_limit, device_addon_bonus, base_device_limit + device_addon_bonus
+
+    async def _build_access_bundle(
+        self,
+        session: AsyncSession,
+        *,
+        user: Any | None,
+        subscription: Any,
+        vpn_account: Any,
+    ) -> AccessBundle:
+        base_device_limit, device_addon_bonus, effective_device_limit = await self._calculate_device_limits(
+            session,
+            user=user,
+        )
+        model = user_view_model(user, subscription, vpn_account)
+        return AccessBundle(
+            **model,
+            base_device_limit=base_device_limit,
+            device_addon_bonus=device_addon_bonus,
+            effective_device_limit=effective_device_limit,
+        )
 
     def _is_white_unlimited(self, telegram_user_id: int) -> bool:
         return telegram_user_id in self.settings.white_unlimited_user_ids
@@ -162,6 +212,25 @@ class AccessService:
             f"Сейчас доступно: <b>{total_remaining}</b>"
         )
 
+    def _build_device_addon_notification_text(
+        self,
+        *,
+        added_devices: int,
+        effective_device_limit: int,
+        base_subscription_active: bool,
+    ) -> str:
+        if base_subscription_active:
+            return (
+                "Платеж получен.\n\n"
+                f"Добавлено <b>+{added_devices}</b> устройства.\n"
+                f"Сейчас доступно: <b>{effective_device_limit}</b> устройств."
+            )
+        return (
+            "Платеж получен.\n\n"
+            f"Добавлено <b>+{added_devices}</b> устройства.\n"
+            "Основная подписка сейчас неактивна, поэтому бонус сохранён и автоматически применится после её активации."
+        )
+
     @staticmethod
     def _white_donation_order_uuid(event: TributeEvent) -> str:
         if event.donation_request_id is not None:
@@ -176,12 +245,13 @@ class AccessService:
         user: Any,
         expires_at: datetime | None,
     ) -> Any:
+        _, _, effective_device_limit = await self._calculate_device_limits(session, user=user)
         remote = await self.remnawave.sync_access(
             telegram_user_id=user.telegram_user_id,
             telegram_username=user.telegram_username,
             first_name=user.first_name,
             expires_at=expires_at,
-            device_limit=user.device_limit,
+            device_limit=effective_device_limit or self.settings.remnawave_default_device_limit,
         )
         vpn_account = await self.vpn_accounts.get_account(session, user.telegram_user_id)
         if remote is not None and getattr(remote, "subscription_url", None):
@@ -280,6 +350,7 @@ class AccessService:
     ) -> WhiteAccessState:
         existing_remote = await self.remnawave.get_white_user(user.telegram_user_id)
         existing_used_bytes = self.remnawave.extract_used_traffic_bytes(existing_remote)
+        _, _, effective_device_limit = await self._calculate_device_limits(session, user=user)
 
         if not self._white_feature_enabled():
             return WhiteAccessState(
@@ -312,7 +383,7 @@ class AccessService:
                 telegram_username=user.telegram_username,
                 first_name=user.first_name,
                 expires_at=None,
-                device_limit=user.device_limit,
+                device_limit=effective_device_limit or self.settings.remnawave_default_device_limit,
                 traffic_limit_bytes=None,
             )
             if remote is not None:
@@ -334,7 +405,7 @@ class AccessService:
                 telegram_username=user.telegram_username,
                 first_name=user.first_name,
                 expires_at=expires_at,
-                device_limit=user.device_limit,
+                device_limit=effective_device_limit or self.settings.remnawave_default_device_limit,
                 traffic_limit_bytes=None,
             )
             vpn_account = await self.white_vpn_accounts.get_account(session, user.telegram_user_id)
@@ -380,7 +451,7 @@ class AccessService:
             telegram_username=user.telegram_username,
             first_name=user.first_name,
             expires_at=expires_at,
-            device_limit=user.device_limit,
+            device_limit=effective_device_limit or self.settings.remnawave_default_device_limit,
             traffic_limit_bytes=traffic_limit_bytes,
         )
         current_used_bytes = self.remnawave.extract_used_traffic_bytes(remote)
@@ -402,7 +473,7 @@ class AccessService:
                     telegram_username=user.telegram_username,
                     first_name=user.first_name,
                     expires_at=expires_at,
-                    device_limit=user.device_limit,
+                    device_limit=effective_device_limit or self.settings.remnawave_default_device_limit,
                     traffic_limit_bytes=traffic_limit_bytes,
                 )
                 current_used_bytes = self.remnawave.extract_used_traffic_bytes(remote)
@@ -481,8 +552,12 @@ class AccessService:
             expires_at=ensure_utc(expires_at),
         )
         subscription = await self.subscriptions.get_subscription(session, telegram_user_id)
-        model = user_view_model(user, subscription, vpn_account)
-        return AccessBundle(**model)
+        return await self._build_access_bundle(
+            session,
+            user=user,
+            subscription=subscription,
+            vpn_account=vpn_account,
+        )
 
     async def register_telegram_user(self, tg_user: TgUser) -> Any:
         async with session_scope(self.session_factory) as session:
@@ -501,8 +576,12 @@ class AccessService:
             user = await self.users.get_user(session, telegram_user_id)
             subscription = await self.subscriptions.get_subscription(session, telegram_user_id)
             vpn_account = await self.vpn_accounts.get_account(session, telegram_user_id)
-            model = user_view_model(user, subscription, vpn_account)
-            return AccessBundle(**model)
+            return await self._build_access_bundle(
+                session,
+                user=user,
+                subscription=subscription,
+                vpn_account=vpn_account,
+            )
 
     async def get_white_access_state(self, telegram_user_id: int) -> WhiteAccessState:
         async with session_scope(self.session_factory) as session:
@@ -582,8 +661,12 @@ class AccessService:
                     user=user,
                     expires_at=expires_at if subscription_is_active(subscription) else None,
                 )
-            model = user_view_model(user, subscription, vpn_account)
-            return AccessBundle(**model)
+            return await self._build_access_bundle(
+                session,
+                user=user,
+                subscription=subscription,
+                vpn_account=vpn_account,
+            )
 
     async def process_tribute_webhook(self, headers: dict[str, str], body: bytes) -> WebhookProcessResult:
         if not self.tribute.verify_signature(headers, body):
@@ -599,10 +682,6 @@ class AccessService:
                 return result
 
             if event.is_subscription_event and event.telegram_user_id is not None:
-                existing_subscription = await self.subscriptions.get_subscription(
-                    session,
-                    event.telegram_user_id,
-                )
                 user = await self.users.upsert_user(
                     session,
                     telegram_user_id=event.telegram_user_id,
@@ -610,36 +689,79 @@ class AccessService:
                     first_name=None,
                     language_code=None,
                     is_admin=event.telegram_user_id in self.settings.bot_admin_ids,
-                    device_limit=(
-                        self.settings.remnawave_default_device_limit
-                        if existing_subscription and existing_subscription.source == "promo"
-                        else None
-                    ),
+                    device_limit=None,
                     preserve_missing_fields=True,
                 )
                 expires_at = ensure_utc(event.expires_at)
                 status = "ACTIVE" if expires_at and expires_at > datetime.now(UTC) else "INACTIVE"
-                await self.subscriptions.upsert_subscription(
-                    session,
-                    telegram_user_id=user.telegram_user_id,
-                    tribute_subscription_id=event.tribute_subscription_id,
-                    period_id=event.period_id,
-                    channel_id=event.channel_id,
-                    status=status,
-                    expires_at=expires_at,
-                    cancelled=event.cancelled,
-                    source="tribute",
-                )
-                await self._sync_regular_account(
-                    session,
-                    user=user,
-                    expires_at=expires_at if expires_at and expires_at > datetime.now(UTC) else None,
-                )
-                await self._sync_white_state(
-                    session,
-                    user=user,
-                    expires_at=expires_at if expires_at and expires_at > datetime.now(UTC) else None,
-                )
+                device_addon_bonus = self._resolve_device_addon_bonus(event.subscription_name)
+                if device_addon_bonus is not None and event.tribute_subscription_id is not None:
+                    await self.device_addon_subscriptions.upsert_subscription(
+                        session,
+                        telegram_user_id=user.telegram_user_id,
+                        tribute_subscription_id=event.tribute_subscription_id,
+                        subscription_name=event.subscription_name or f"+{device_addon_bonus} устройства",
+                        period_id=event.period_id,
+                        channel_id=event.channel_id,
+                        bonus_devices=device_addon_bonus,
+                        status=status,
+                        expires_at=expires_at,
+                        cancelled=event.cancelled,
+                        source="tribute",
+                    )
+                    subscription = await self.subscriptions.get_subscription(session, user.telegram_user_id)
+                    subscription_expires_at = (
+                        ensure_utc(subscription.expires_at)
+                        if subscription and subscription_is_active(subscription)
+                        else None
+                    )
+                    if subscription_expires_at is not None:
+                        await self._sync_regular_account(
+                            session,
+                            user=user,
+                            expires_at=subscription_expires_at,
+                        )
+                        await self._sync_white_state(
+                            session,
+                            user=user,
+                            expires_at=subscription_expires_at,
+                        )
+                    if event.event_name == "new_subscription" and status == "ACTIVE":
+                        _, _, effective_device_limit = await self._calculate_device_limits(session, user=user)
+                        result.notification_telegram_user_id = user.telegram_user_id
+                        result.notification_text = self._build_device_addon_notification_text(
+                            added_devices=device_addon_bonus,
+                            effective_device_limit=effective_device_limit or user.device_limit,
+                            base_subscription_active=subscription_expires_at is not None,
+                        )
+                else:
+                    existing_subscription = await self.subscriptions.get_subscription(
+                        session,
+                        event.telegram_user_id,
+                    )
+                    if existing_subscription and existing_subscription.source == "promo":
+                        user.device_limit = self.settings.remnawave_default_device_limit
+                    await self.subscriptions.upsert_subscription(
+                        session,
+                        telegram_user_id=user.telegram_user_id,
+                        tribute_subscription_id=event.tribute_subscription_id,
+                        period_id=event.period_id,
+                        channel_id=event.channel_id,
+                        status=status,
+                        expires_at=expires_at,
+                        cancelled=event.cancelled,
+                        source="tribute",
+                    )
+                    await self._sync_regular_account(
+                        session,
+                        user=user,
+                        expires_at=expires_at if expires_at and expires_at > datetime.now(UTC) else None,
+                    )
+                    await self._sync_white_state(
+                        session,
+                        user=user,
+                        expires_at=expires_at if expires_at and expires_at > datetime.now(UTC) else None,
+                    )
 
             if event.event_name == "new_donation" and event.telegram_user_id is not None:
                 granted_bytes = self._resolve_white_topup_granted_bytes(
@@ -750,7 +872,12 @@ class AccessService:
                 user=user,
                 expires_at=expires_at if subscription_is_active(subscription) else None,
             )
-            return AccessBundle(**user_view_model(user, subscription, vpn_account))
+            return await self._build_access_bundle(
+                session,
+                user=user,
+                subscription=subscription,
+                vpn_account=vpn_account,
+            )
 
     async def admin_get_stats(self) -> DashboardStats:
         async with session_scope(self.session_factory) as session:
@@ -762,15 +889,20 @@ class AccessService:
     async def admin_find_user_by_lookup(self, lookup: str) -> AccessBundle:
         normalized = _normalize_admin_lookup(lookup)
         if not normalized:
-            return AccessBundle(**user_view_model(None, None, None))
+            return AccessBundle(**user_view_model(None, None, None), base_device_limit=None, device_addon_bonus=0, effective_device_limit=None)
 
         async with session_scope(self.session_factory) as session:
             user = await self._resolve_user_lookup(session, normalized)
             if user is None:
-                return AccessBundle(**user_view_model(None, None, None))
+                return AccessBundle(**user_view_model(None, None, None), base_device_limit=None, device_addon_bonus=0, effective_device_limit=None)
             subscription = await self.subscriptions.get_subscription(session, user.telegram_user_id)
             vpn_account = await self.vpn_accounts.get_account(session, user.telegram_user_id)
-            return AccessBundle(**user_view_model(user, subscription, vpn_account))
+            return await self._build_access_bundle(
+                session,
+                user=user,
+                subscription=subscription,
+                vpn_account=vpn_account,
+            )
 
     async def admin_count_users(self, *, active_only: bool = False) -> int:
         async with session_scope(self.session_factory) as session:
@@ -831,7 +963,12 @@ class AccessService:
                 user=user,
                 expires_at=new_expires_at,
             )
-            return AccessBundle(**user_view_model(user, subscription, vpn_account))
+            return await self._build_access_bundle(
+                session,
+                user=user,
+                subscription=subscription,
+                vpn_account=vpn_account,
+            )
 
     async def admin_update_device_limit(
         self,
@@ -863,7 +1000,12 @@ class AccessService:
                     user=user,
                     expires_at=expires_at,
                 )
-            return AccessBundle(**user_view_model(user, subscription, vpn_account))
+            return await self._build_access_bundle(
+                session,
+                user=user,
+                subscription=subscription,
+                vpn_account=vpn_account,
+            )
 
     async def admin_count_promo_redemptions(self, *, code: str) -> int:
         normalized_code = normalize_promo_code(code)
@@ -872,8 +1014,15 @@ class AccessService:
         async with session_scope(self.session_factory) as session:
             return await self.promo_redemptions.count_by_code(session, code=normalized_code)
 
-    async def admin_list_broadcast_user_ids(self, *, code: str | None = None) -> list[int]:
+    async def admin_list_broadcast_user_ids(
+        self,
+        *,
+        code: str | None = None,
+        active_only: bool = False,
+    ) -> list[int]:
         async with session_scope(self.session_factory) as session:
+            if active_only:
+                return await self.users.list_active_telegram_user_ids(session)
             if code is None:
                 return await self.users.list_telegram_user_ids(session)
             normalized_code = normalize_promo_code(code)
@@ -972,12 +1121,14 @@ class AccessService:
         async with session_scope(self.session_factory) as session:
             existing_subscription = await self.subscriptions.get_subscription(session, telegram_user_id)
             if subscription_is_active(existing_subscription):
-                model = user_view_model(
-                    await self.users.get_user(session, telegram_user_id),
-                    existing_subscription,
-                    await self.vpn_accounts.get_account(session, telegram_user_id),
+                user = await self.users.get_user(session, telegram_user_id)
+                vpn_account = await self.vpn_accounts.get_account(session, telegram_user_id)
+                return await self._build_access_bundle(
+                    session,
+                    user=user,
+                    subscription=existing_subscription,
+                    vpn_account=vpn_account,
                 )
-                return AccessBundle(**model)
 
             promo_code = await self.promo_codes.get_by_code(session, normalized_code)
             if promo_code is None:
@@ -1017,6 +1168,7 @@ class AccessService:
             deleted_manual_imports = await self.manual_imports.delete_for_user(session, telegram_user_id)
             deleted_white_cycles = await self.white_traffic_cycles.delete_for_user(session, telegram_user_id)
             deleted_white_orders = await self.white_topup_orders.delete_for_user(session, telegram_user_id)
+            deleted_device_addons = await self.device_addon_subscriptions.delete_for_user(session, telegram_user_id)
             deleted_white_account = await self.white_vpn_accounts.delete_account(session, telegram_user_id)
             deleted_account = await self.vpn_accounts.delete_account(session, telegram_user_id)
             deleted_subscription = await self.subscriptions.delete_subscription(session, telegram_user_id)
@@ -1028,6 +1180,7 @@ class AccessService:
                     bool(deleted_manual_imports),
                     bool(deleted_white_cycles),
                     bool(deleted_white_orders),
+                    bool(deleted_device_addons),
                     deleted_white_account,
                     deleted_account,
                     deleted_subscription,

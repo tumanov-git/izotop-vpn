@@ -29,6 +29,7 @@ class User(Base):
     white_vpn_account: Mapped["WhiteVpnAccount"] = relationship(back_populates="user", uselist=False)
     white_traffic_cycles: Mapped[list["WhiteTrafficCycle"]] = relationship(back_populates="user")
     white_topup_orders: Mapped[list["WhiteTopUpOrder"]] = relationship(back_populates="user")
+    device_addon_subscriptions: Mapped[list["DeviceAddonSubscription"]] = relationship(back_populates="user")
 
 
 class Subscription(Base):
@@ -125,6 +126,29 @@ class WhiteTopUpOrder(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     user: Mapped[User] = relationship(back_populates="white_topup_orders")
+
+
+class DeviceAddonSubscription(Base):
+    __tablename__ = "device_addon_subscriptions"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    telegram_user_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("users.telegram_user_id"), index=True, nullable=False
+    )
+    tribute_subscription_id: Mapped[int] = mapped_column(BigInteger, unique=True, index=True, nullable=False)
+    subscription_name: Mapped[str] = mapped_column(String(255), nullable=False)
+    period_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    channel_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    bonus_devices: Mapped[int] = mapped_column(Integer, nullable=False)
+    status: Mapped[str] = mapped_column(String(32), default="INACTIVE", nullable=False)
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    cancelled: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    source: Mapped[str] = mapped_column(String(32), default="tribute", nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+    user: Mapped[User] = relationship(back_populates="device_addon_subscriptions")
 
 
 class WebhookEvent(Base):
