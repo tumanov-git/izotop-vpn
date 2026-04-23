@@ -30,6 +30,45 @@ async def init_db(engine: AsyncEngine) -> None:
                 await conn.exec_driver_sql(
                     "ALTER TABLE users ADD COLUMN device_limit INTEGER NOT NULL DEFAULT 3"
                 )
+            result = await conn.exec_driver_sql(
+                "SELECT sql FROM sqlite_master WHERE type='table' AND name='device_addon_subscriptions'"
+            )
+            row = result.fetchone()
+            create_sql = row[0] if row else None
+            if create_sql and "tribute_subscription_id BIGINT NOT NULL" in create_sql:
+                await conn.exec_driver_sql("ALTER TABLE device_addon_subscriptions RENAME TO device_addon_subscriptions_legacy")
+                await conn.run_sync(Base.metadata.create_all)
+                await conn.exec_driver_sql(
+                    """
+                    INSERT INTO device_addon_subscriptions (
+                        telegram_user_id,
+                        tribute_subscription_id,
+                        subscription_name,
+                        period_id,
+                        channel_id,
+                        bonus_devices,
+                        status,
+                        expires_at,
+                        cancelled,
+                        source,
+                        updated_at
+                    )
+                    SELECT
+                        telegram_user_id,
+                        tribute_subscription_id,
+                        subscription_name,
+                        period_id,
+                        channel_id,
+                        bonus_devices,
+                        status,
+                        expires_at,
+                        cancelled,
+                        source,
+                        updated_at
+                    FROM device_addon_subscriptions_legacy
+                    """
+                )
+                await conn.exec_driver_sql("DROP TABLE device_addon_subscriptions_legacy")
 
 
 @asynccontextmanager

@@ -695,7 +695,7 @@ class AccessService:
                 expires_at = ensure_utc(event.expires_at)
                 status = "ACTIVE" if expires_at and expires_at > datetime.now(UTC) else "INACTIVE"
                 device_addon_bonus = self._resolve_device_addon_bonus(event.subscription_name)
-                if device_addon_bonus is not None and event.tribute_subscription_id is not None:
+                if device_addon_bonus is not None:
                     await self.device_addon_subscriptions.upsert_subscription(
                         session,
                         telegram_user_id=user.telegram_user_id,

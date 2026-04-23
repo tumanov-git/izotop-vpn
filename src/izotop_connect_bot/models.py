@@ -130,12 +130,15 @@ class WhiteTopUpOrder(Base):
 
 class DeviceAddonSubscription(Base):
     __tablename__ = "device_addon_subscriptions"
+    __table_args__ = (
+        UniqueConstraint("telegram_user_id", "subscription_name", name="uq_device_addon_user_name"),
+    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     telegram_user_id: Mapped[int] = mapped_column(
         BigInteger, ForeignKey("users.telegram_user_id"), index=True, nullable=False
     )
-    tribute_subscription_id: Mapped[int] = mapped_column(BigInteger, unique=True, index=True, nullable=False)
+    tribute_subscription_id: Mapped[int | None] = mapped_column(BigInteger, index=True, nullable=True)
     subscription_name: Mapped[str] = mapped_column(String(255), nullable=False)
     period_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     channel_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)

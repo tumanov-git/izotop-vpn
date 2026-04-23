@@ -503,13 +503,15 @@ class WhiteTopUpOrderRepository:
 
 
 class DeviceAddonSubscriptionRepository:
-    async def get_by_tribute_subscription_id(
+    async def get_for_user_and_name(
         self,
         session: AsyncSession,
-        tribute_subscription_id: int,
+        telegram_user_id: int,
+        subscription_name: str,
     ) -> DeviceAddonSubscription | None:
         query = select(DeviceAddonSubscription).where(
-            DeviceAddonSubscription.tribute_subscription_id == tribute_subscription_id
+            DeviceAddonSubscription.telegram_user_id == telegram_user_id,
+            DeviceAddonSubscription.subscription_name == subscription_name,
         )
         return (await session.execute(query)).scalar_one_or_none()
 
@@ -518,7 +520,7 @@ class DeviceAddonSubscriptionRepository:
         session: AsyncSession,
         *,
         telegram_user_id: int,
-        tribute_subscription_id: int,
+        tribute_subscription_id: int | None,
         subscription_name: str,
         period_id: int | None,
         channel_id: int | None,
@@ -528,7 +530,11 @@ class DeviceAddonSubscriptionRepository:
         cancelled: bool,
         source: str = "tribute",
     ) -> DeviceAddonSubscription:
-        subscription = await self.get_by_tribute_subscription_id(session, tribute_subscription_id)
+        subscription = await self.get_for_user_and_name(
+            session,
+            telegram_user_id=telegram_user_id,
+            subscription_name=subscription_name,
+        )
         if subscription is None:
             subscription = DeviceAddonSubscription(
                 telegram_user_id=telegram_user_id,
@@ -546,6 +552,7 @@ class DeviceAddonSubscriptionRepository:
         else:
             subscription.telegram_user_id = telegram_user_id
             subscription.subscription_name = subscription_name
+            subscription.tribute_subscription_id = tribute_subscription_id
             subscription.period_id = period_id
             subscription.channel_id = channel_id
             subscription.bonus_devices = bonus_devices
