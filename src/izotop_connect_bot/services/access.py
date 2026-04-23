@@ -57,6 +57,14 @@ class WhiteAccessState:
     traffic_limit_bytes: int | None
 
 
+@dataclass(slots=True)
+class WebhookProcessResult:
+    event: TributeEvent
+    is_duplicate: bool = False
+    notification_telegram_user_id: int | None = None
+    notification_text: str | None = None
+
+
 def normalize_promo_code(code: str) -> str:
     return code.replace("\r\n", "\n").strip()
 
@@ -124,6 +132,32 @@ class AccessService:
         normalized = gigabytes.normalize()
         text = format(normalized, "f").rstrip("0").rstrip(".")
         return text or "0"
+
+    def _format_white_remaining_text(self, remaining_bytes: int, *, is_unlimited: bool) -> str:
+        if is_unlimited:
+            return "безлимитно"
+        gigabytes = Decimal(max(0, remaining_bytes)) / Decimal(BYTES_PER_GB)
+        return f"~{gigabytes:.2f}".replace(".", ",") + " гигабайт"
+
+    def _build_white_topup_notification_text(
+        self,
+        *,
+        granted_bytes: int,
+        white_access: WhiteAccessState,
+    ) -> str:
+        granted_gb = self._format_white_topup_gigabytes(granted_bytes)
+        total_remaining_bytes = (
+            white_access.current_free_remaining_bytes + white_access.purchased_remaining_bytes
+        )
+        total_remaining = self._format_white_remaining_text(
+            total_remaining_bytes,
+            is_unlimited=white_access.is_unlimited,
+        )
+        return (
+            "Платёж получен.\n\n"
+            f"Начислил <b>{granted_gb} GB</b> белого трафика.\n"
+            f"Сейчас доступно: <b>{total_remaining}</b>"
+        )
 
     @staticmethod
     def _white_donation_order_uuid(event: TributeEvent) -> str:
@@ -548,16 +582,18 @@ class AccessService:
             model = user_view_model(user, subscription, vpn_account)
             return AccessBundle(**model)
 
-    async def process_tribute_webhook(self, headers: dict[str, str], body: bytes) -> TributeEvent:
+    async def process_tribute_webhook(self, headers: dict[str, str], body: bytes) -> WebhookProcessResult:
         if not self.tribute.verify_signature(headers, body):
             raise PermissionError("Invalid Tribute signature")
 
         payload = json.loads(body.decode("utf-8"))
         event = self.tribute.parse_event(payload)
+        result = WebhookProcessResult(event=event)
 
         async with session_scope(self.session_factory) as session:
             if await self.webhook_events.exists(session, event.event_key):
-                return event
+                result.is_duplicate = True
+                return result
 
             if event.is_subscription_event and event.telegram_user_id is not None:
                 existing_subscription = await self.subscriptions.get_subscription(
@@ -643,10 +679,15 @@ class AccessService:
                         order.paid_at = datetime.now(UTC)
                     subscription = await self.subscriptions.get_subscription(session, user.telegram_user_id)
                     expires_at = ensure_utc(subscription.expires_at) if subscription else None
-                    await self._sync_white_state(
+                    white_access = await self._sync_white_state(
                         session,
                         user=user,
                         expires_at=expires_at if subscription_is_active(subscription) else None,
+                    )
+                    result.notification_telegram_user_id = user.telegram_user_id
+                    result.notification_text = self._build_white_topup_notification_text(
+                        granted_bytes=granted_bytes,
+                        white_access=white_access,
                     )
 
             await self.webhook_events.store(
@@ -656,7 +697,7 @@ class AccessService:
                 payload_json=self.tribute.dump_payload(payload),
             )
 
-        return event
+        return result
 
     async def admin_grant_white_traffic(
         self,

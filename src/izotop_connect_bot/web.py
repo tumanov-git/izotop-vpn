@@ -87,9 +87,21 @@ def create_app(settings: Settings) -> FastAPI:
     async def tribute_webhook(request: Request) -> dict[str, str]:
         body = await request.body()
         try:
-            await state.access.process_tribute_webhook(dict(request.headers), body)
+            result = await state.access.process_tribute_webhook(dict(request.headers), body)
         except PermissionError as exc:
             raise HTTPException(status_code=401, detail=str(exc)) from exc
+        if (
+            not result.is_duplicate
+            and result.notification_telegram_user_id is not None
+            and result.notification_text
+        ):
+            try:
+                await state.bot.send_message(
+                    result.notification_telegram_user_id,
+                    result.notification_text,
+                )
+            except Exception:
+                pass
         return {"status": "accepted"}
 
     return app

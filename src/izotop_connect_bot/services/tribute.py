@@ -22,6 +22,8 @@ def parse_amount_minor(value: Any) -> int | None:
         amount = Decimal(str(value))
     except (InvalidOperation, ValueError):
         return None
+    if amount == amount.to_integral_value():
+        return int(amount)
     return int((amount * 100).to_integral_value())
 
 
