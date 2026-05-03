@@ -38,6 +38,7 @@ from izotop_connect_bot.bot.texts import (
     DEVICE_GUIDES,
     FAQ_ITEMS,
     SubscriptionState,
+    WHITE_DEVICE_GUIDES,
     add_devices_text,
     admin_broadcast_confirm_text,
     admin_broadcast_menu_text,
@@ -590,7 +591,7 @@ def create_router(access_service: AccessService, settings: Settings) -> Router:
         if not callback.from_user or not callback.message:
             return
         _, device = callback.data.split(":", 1)
-        guide = DEVICE_GUIDES[device]
+        guide = WHITE_DEVICE_GUIDES[device]
         access = await access_service.get_access_bundle(callback.from_user.id)
         if not access.is_active:
             await _render_user_screen(
@@ -625,6 +626,21 @@ def create_router(access_service: AccessService, settings: Settings) -> Router:
             picture_path=WHITE_INTERNET_PICTURE,
         )
         await callback.answer("Белый доступ готов")
+
+    @router.callback_query(F.data == "white:key:qr")
+    async def on_white_key_qr(callback: CallbackQuery) -> None:
+        if not callback.from_user or not callback.message:
+            return
+        white_access = await access_service.get_white_access_state(callback.from_user.id)
+        white_vpn_account = getattr(white_access, "vpn_account", None)
+        if white_vpn_account is None:
+            await callback.answer("Сначала нужно выдать белый доступ", show_alert=True)
+            return
+        await callback.message.answer_photo(
+            _qr_image(white_vpn_account.subscription_url),
+            caption="QR для импорта подписки белого интернета в совместимый клиент.",
+        )
+        await callback.answer()
 
     @router.callback_query(F.data == "home:keys")
     async def on_keys(callback: CallbackQuery) -> None:

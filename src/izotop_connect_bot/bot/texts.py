@@ -73,6 +73,56 @@ DEVICE_GUIDES: dict[str, dict[str, str]] = {
     },
 }
 
+WHITE_DEVICE_GUIDES: dict[str, dict[str, str]] = {
+    "iphone": {
+        "title": "iPhone",
+        "body": (
+            "1. Установи Happ из App Store. Регион:\n"
+            "RU: <a href=\"https://apps.apple.com/ru/app/happ-proxy-utility-plus/id6746188973\">нажать</a>\n"
+            "Other: <a href=\"https://apps.apple.com/us/app/happ-proxy-utility/id6504287215\">нажать</a>\n"
+            "2. Нажми <b>Открыть доступ</b> или <b>Показать QR</b>.\n"
+            "3. Импортируй ссылку или QR в Happ.\n"
+            "4. Включи профиль и разреши VPN."
+        ),
+    },
+    "android": {
+        "title": "Android",
+        "body": (
+            "1. Установи <a href=\"https://play.google.com/store/apps/details?id=com.happproxy\">Happ из Google Play</a>.\n"
+            "2. Нажми <b>Открыть доступ</b> или <b>Показать QR</b>.\n"
+            "3. Импортируй ссылку или QR в Happ.\n"
+            "4. Подключись через созданную запись."
+        ),
+    },
+    "windows": {
+        "title": "Windows",
+        "body": (
+            "1. Установи <a href=\"https://github.com/Happ-proxy/happ-desktop/releases/latest/download/setup-Happ.x64.exe\">Happ для Windows</a>.\n"
+            "2. Нажми <b>Открыть доступ</b> или используй <b>QR-код</b>.\n"
+            "3. Импортируй подписку в Happ.\n"
+            "4. Подключись через созданную запись."
+        ),
+    },
+    "macos": {
+        "title": "macOS",
+        "body": (
+            "1. Установи <a href=\"https://github.com/Happ-proxy/happ-desktop/releases/latest/download/Happ.macOS.universal.dmg\">Happ для macOS</a>.\n"
+            "2. Нажми <b>Открыть доступ</b> или используй <b>QR-код</b>.\n"
+            "3. Импортируй подписку в Happ.\n"
+            "4. Подключись через созданную запись."
+        ),
+    },
+    "smart_tv": {
+        "title": "Smart TV",
+        "body": (
+            "1. Установи совместимый клиент для Android TV.\n"
+            "2. Открой ссылку на другом устройстве или используй <b>QR-код</b>.\n"
+            "3. Импортируй подписку в клиент.\n"
+            "4. Подключись через созданную запись."
+        ),
+    },
+}
+
 FAQ_ITEMS: dict[str, dict[str, str]] = {
     "what_is_subscription": {
         "title": "Что такое subscription URL?",
@@ -168,10 +218,8 @@ def white_internet_text(*, white_traffic_remaining: str, is_unlimited: bool = Fa
         "Белый интернет — это когда на мобильном интернете можно ходить только на определенные сайты. "
         "Есть некий \"белый список\". Все, что в него не входит, запрещено. "
         "Наш Izotop Connect решает эту проблем. 5 гб/месяц бесплатно.\n\n"
-        "Пополнение: 1 гигабайт = 2 ₽.\n"
-        "50гб — 100р\n"
-        "100гб — 200р\n"
-        "250гб — 500р\n"
+        "Пополнение: <b>1 гигабайт = 2 ₽</b>.\n"
+        "Например: 50 гб = 100 ₽, 100 гб = 200 ₽, 250 гб = 500 ₽.\n"
         "Можно отправить любую сумму в Tribute, а трафик зачислится автоматически по этой формуле. "
         "ГБ не сгорают и переносятся на следующий месяц."
     )
@@ -200,7 +248,7 @@ def white_keys_text(*, expires_at: datetime | None, subscription_url: str) -> st
         "Это ссылка именно на белый интернет.\n\n"
         f"<b>Активен до:</b> {format_expiry(expires_at)}\n"
         f"<b>Subscription URL для белого интернета:</b>\n<code>{subscription_url}</code>\n\n"
-        "Используй кнопку ниже, чтобы импортировать эту подписку в клиент."
+        "Используй кнопку ниже или QR-код, чтобы импортировать эту подписку в клиент."
     )
 
 

@@ -160,6 +160,7 @@ def white_access_result_keyboard(subscription_url: str) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
             [InlineKeyboardButton(text="Открыть доступ", url=subscription_url, style=ButtonStyle.SUCCESS)],
+            [InlineKeyboardButton(text="Показать QR", callback_data="white:key:qr", style=ButtonStyle.PRIMARY)],
             [InlineKeyboardButton(text="Назад", callback_data="home:white")],
         ]
     )
