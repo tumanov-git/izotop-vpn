@@ -233,8 +233,6 @@ class AccessService:
 
     @staticmethod
     def _white_donation_order_uuid(event: TributeEvent) -> str:
-        if event.donation_request_id is not None:
-            return f"donation:{event.donation_request_id}"
         digest = hashlib.sha256(event.event_key.encode("utf-8")).hexdigest()
         return f"donation:{digest[:48]}"
 

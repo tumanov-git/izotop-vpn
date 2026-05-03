@@ -83,7 +83,12 @@ class TributeService:
         expires_at = parse_datetime(data.get("expires_at"))
         event_key_parts = [event_name, str(created_at)]
         if donation_request_id is not None:
-            event_key_parts.append(str(donation_request_id))
+            event_key_parts.extend(
+                [
+                    str(telegram_user_id or "unknown"),
+                    str(donation_request_id),
+                ]
+            )
         else:
             event_key_parts.extend(
                 [
