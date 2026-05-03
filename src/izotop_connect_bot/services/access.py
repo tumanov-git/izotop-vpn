@@ -197,7 +197,7 @@ class AccessService:
         white_access: WhiteAccessState,
     ) -> str:
         amount_rub = Decimal(amount_minor) / Decimal(100)
-        amount_text = format(amount_rub.normalize(), "f").rstrip("0").rstrip(".") or "0"
+        amount_text = f"{amount_rub:.2f}".rstrip("0").rstrip(".") or "0"
         granted_gb = self._format_white_topup_gigabytes(granted_bytes)
         total_remaining_bytes = (
             white_access.current_free_remaining_bytes + white_access.purchased_remaining_bytes
